@@ -1,0 +1,568 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Hermes Agent Hackathon — 75s Live Plugin Showcase (@misakamikotoghr-5205)</title>
+<style>
+  :root {
+    --bg: #080b12;
+    --panel: #0f1523;
+    --border: #1e293b;
+    --accent: #38bdf8;
+    --accent2: #a855f7;
+    --green: #22c55e;
+    --amber: #f59e0b;
+    --red: #ef4444;
+    --text: #f1f5f9;
+    --muted: #94a3b8;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    min-height: 100vh;
+    padding: 18px;
+  }
+  .topbar {
+    width: 1280px;
+    max-width: 100%;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 12px;
+    padding: 10px 16px;
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+  }
+  .topbar-title {
+    font-weight: 700;
+    font-size: 15px;
+    color: var(--text);
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+  .badge {
+    background: rgba(56, 189, 248, 0.15);
+    color: var(--accent);
+    border: 1px solid rgba(56, 189, 248, 0.35);
+    font-size: 12px;
+    padding: 3px 8px;
+    border-radius: 999px;
+    font-weight: 600;
+  }
+  .controls {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  button {
+    background: #1e293b;
+    color: var(--text);
+    border: 1px solid #334155;
+    padding: 7px 13px;
+    border-radius: 6px;
+    font-size: 13px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.15s;
+  }
+  button:hover { background: #334155; }
+  button.primary {
+    background: linear-gradient(135deg, #0284c7, #7c3aed);
+    border-color: #38bdf8;
+  }
+  button.record-btn {
+    background: rgba(239, 68, 68, 0.18);
+    color: #fca5a5;
+    border-color: rgba(239, 68, 68, 0.45);
+  }
+  button.record-btn.recording {
+    background: #ef4444;
+    color: #fff;
+    animation: pulse 1.2s infinite;
+  }
+  @keyframes pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.65; }
+  }
+  .stage-wrap {
+    position: relative;
+    width: 1280px;
+    height: 720px;
+    border-radius: 12px;
+    overflow: hidden;
+    box-shadow: 0 24px 60px rgba(0, 0, 0, 0.65);
+    border: 1px solid #1e293b;
+  }
+  canvas {
+    width: 100%;
+    height: 100%;
+    display: block;
+  }
+  .timeline-bar {
+    width: 1280px;
+    max-width: 100%;
+    margin-top: 12px;
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 12px 16px;
+  }
+  .scrubber {
+    width: 100%;
+    accent-color: var(--accent);
+    cursor: pointer;
+  }
+  .chapters {
+    display: flex;
+    justify-content: space-between;
+    margin-top: 8px;
+    gap: 8px;
+  }
+  .chapter-btn {
+    flex: 1;
+    text-align: left;
+    font-size: 12px;
+    padding: 6px 10px;
+  }
+  .voiceover-box {
+    width: 1280px;
+    max-width: 100%;
+    margin-top: 10px;
+    padding: 12px 18px;
+    background: rgba(15, 21, 35, 0.9);
+    border-left: 4px solid var(--accent);
+    border-radius: 6px;
+    font-size: 14px;
+    color: #e2e8f0;
+    line-height: 1.5;
+  }
+</style>
+</head>
+<body>
+
+<div class="topbar">
+  <div class="topbar-title">
+    <span>⚡ Hermes Agent Plugin Hackathon Showcase</span>
+    <span class="badge">75.0s / 90.0s Limit</span>
+    <span class="badge">misakamikotoghr-5205</span>
+  </div>
+  <div class="controls">
+    <button id="playPauseBtn" class="primary">⏸ Pause</button>
+    <button id="restartBtn">↺ Restart (0:00)</button>
+    <button id="recordBtn" class="record-btn">⏺ Export 75s Video (.webm)</button>
+    <span id="timeLabel" style="font-family: monospace; font-size: 14px; min-width: 95px; text-align: right;">00:00 / 01:15</span>
+  </div>
+</div>
+
+<div class="stage-wrap">
+  <canvas id="cinemaCanvas" width="1280" height="720"></canvas>
+</div>
+
+<div class="timeline-bar">
+  <input id="scrubber" class="scrubber" type="range" min="0" max="75" step="0.05" value="0" />
+  <div class="chapters">
+    <button class="chapter-btn" data-t="0">0:00 Intro & Architecture</button>
+    <button class="chapter-btn" data-t="8">0:08 1. Claim Market Router</button>
+    <button class="chapter-btn" data-t="30">0:30 2. Hunk Consent Guard</button>
+    <button class="chapter-btn" data-t="52">0:52 3. Source Trail Supervisor</button>
+    <button class="chapter-btn" data-t="69">1:09 Install & PR Summary</button>
+  </div>
+</div>
+
+<div class="voiceover-box" id="captionBox">
+  <strong>Voiceover / Caption:</strong> <span id="captionText">Loading showcase...</span>
+</div>
+
+<script>
+const canvas = document.getElementById('cinemaCanvas');
+const ctx = canvas.getContext('2d');
+const playPauseBtn = document.getElementById('playPauseBtn');
+const restartBtn = document.getElementById('restartBtn');
+const recordBtn = document.getElementById('recordBtn');
+const scrubber = document.getElementById('scrubber');
+const timeLabel = document.getElementById('timeLabel');
+const captionText = document.getElementById('captionText');
+
+const DURATION = 75.0;
+let currentTime = 0;
+let isPlaying = true;
+let lastFrameTs = performance.now();
+
+const SCENES = [
+  {
+    start: 0, end: 8,
+    chapter: "01 / OVERVIEW",
+    title: "Extending Hermes Agent Beyond Prompts & Skills",
+    subtitle: "Three Runtime Plugins Built From misakamikotoghr-5205's Open-Source Research",
+    caption: "Prompts and skills can't intercept model routing, enforce cryptographic file-hunk consent, or gate contradictions. We built three deep runtime plugins for Hermes Agent.",
+    pillColor: "#38bdf8",
+    terminalTitle: "hermes plugins validate --all",
+    lines: [
+      { t: 0.4, text: "$ python -B scripts/validate_plugins.py", color: "#38bdf8" },
+      { t: 1.4, text: "[OK] claim-market-router     | DelegationProvider + llm_request middleware + post_api_request", color: "#22c55e" },
+      { t: 2.5, text: "[OK] hunk-consent-guard      | tool_execution middleware + SHA-256 drift guard + rollback DB", color: "#22c55e" },
+      { t: 3.6, text: "[OK] source-trail-supervisor | Unicode [start,end) verifier + contradiction gate + loop guard", color: "#22c55e" },
+      { t: 4.8, text: "$ python -B -m unittest discover -s tests -v", color: "#38bdf8" },
+      { t: 5.8, text: "Ran 3 comprehensive Hermes contract suites in 0.093s — OK (100% Catalog Rule 1-18 compliant)", color: "#a855f7" }
+    ],
+    cards: [
+      { title: "1. claim-market-router", desc: "Market-based DelegationProvider + shadow-price effort shaper", tag: "category: models", active: true },
+      { title: "2. hunk-consent-guard", desc: "Per-hunk patch approval, baseline drift revocation & rollback", tag: "category: tools", active: true },
+      { title: "3. source-trail-supervisor", desc: "Exact Unicode span citations, contradiction gate & loop supervisor", tag: "category: general", active: true }
+    ]
+  },
+  {
+    start: 8, end: 30,
+    chapter: "02 / PLUGIN 1: CLAIM-MARKET-ROUTER",
+    title: "Cheap Models Explore. Strong Models Decide. Expensive Models Finalize.",
+    subtitle: "Pluggable DelegationProvider (`delegation.backend: claim_market`) + `llm_request` Effort Shaper",
+    caption: "Plugin 1 turns subagent delegation into a claim market: cheap models win exploration, frontier models win finalization, infeasible budgets return sensitivity proofs, and high shadow prices automatically down-shift reasoning_effort.",
+    pillColor: "#a855f7",
+    terminalTitle: "hermes claim-market auction & llm_request middleware",
+    lines: [
+      { t: 8.5, text: "$ hermes claim-market auction 'Scan workspace test entrypoints' --role explorer --complexity 1", color: "#38bdf8" },
+      { t: 10.2, text: "  -> Winner: scout-fast (google/gemini-2.5-flash, cost=1.0, mode=direct_agreement)", color: "#22c55e" },
+      { t: 11.4, text: "  -> Independent Verifier Nominated: arbiter-frontier (openai/gpt-5)", color: "#94a3b8" },
+      { t: 13.5, text: "$ hermes claim-market auction 'Audit formal safety invariants' --role finalizer --complexity 5", color: "#38bdf8" },
+      { t: 15.2, text: "  -> Winner: arbiter-frontier (openai/gpt-5, cost=8.0, claim_confidence=1.00)", color: "#22c55e" },
+      { t: 17.8, text: "$ hermes claim-market auction 'Build consensus engine' --role implementer --max-cost 0.25", color: "#38bdf8" },
+      { t: 19.5, text: "  [INFEASIBLE] All 3 routes filtered. Sensitivity: raise max_cost_units by +0.75 (to 1.0).", color: "#f59e0b" },
+      { t: 23.0, text: "[Hook: post_api_request] Recorded 95,000 / 100,000 rolling window tokens -> shadow_price λ = 0.237", color: "#a855f7" },
+      { t: 25.0, text: "[Middleware: llm_request] Exploratory turn (1 msg) & λ >= 0.20 -> shaped reasoning_effort='low'", color: "#22c55e" }
+    ],
+    cards: [
+      { title: "scout-fast (Gemini 2.5 Flash)", desc: "Cost: 1.0u | Fit(explorer): 1.00 | Wins low-complexity exploration", tag: "WINNER: EXPLORER", active: true },
+      { title: "builder-balanced (Claude Sonnet 4)", desc: "Cost: 3.5u | Vote weight: 1.4 | Balanced implementer & verifier", tag: "CANDIDATE", active: false },
+      { title: "arbiter-frontier (GPT-5 High)", desc: "Cost: 8.0u | Quality Tier: 5 | Wins finalizer & verifies claims", tag: "WINNER: FINALIZER", active: true }
+    ]
+  },
+  {
+    start: 30, end: 52,
+    chapter: "03 / PLUGIN 2: HUNK-CONSENT-GUARD",
+    title: "Per-Hunk Patch Consent, SHA-256 Drift Revocation & Rollback Receipts",
+    subtitle: "`tool_execution` Middleware + `/hunk-desk` Interactive Review & Atomic Restoration",
+    caption: "Plugin 2 brings Patch Review Desk into Hermes: stage multi-hunk edits, approve Hunk #1 while rejecting Hunk #2, automatically revoke approvals if the file drifts on disk, and roll back any edit by receipt ID.",
+    pillColor: "#22c55e",
+    terminalTitle: "hermes hunk-desk [propose | approve | apply | rollback]",
+    lines: [
+      { t: 30.5, text: "$ hermes hunk-desk status 1   # Target: service_config.py (baseline_sha256: 8fa16cebe4a9...)", color: "#38bdf8" },
+      { t: 32.0, text: "  Hunk #1: -TIMEOUT_SEC = 10   +TIMEOUT_SEC = 30   [status: pending]", color: "#e2e8f0" },
+      { t: 33.2, text: "  Hunk #2: -DEBUG_MODE = False +DEBUG_MODE = True  [status: pending]", color: "#e2e8f0" },
+      { t: 35.5, text: "$ hermes hunk-desk approve 1 1 && hermes hunk-desk apply 1", color: "#38bdf8" },
+      { t: 37.2, text: "  -> Applied ONLY Hunk [1]! Hunk #2 (DEBUG_MODE=True) stayed untouched. Saved Receipt #1.", color: "#22c55e" },
+      { t: 40.5, text: "$ hermes hunk-desk rollback 1", color: "#38bdf8" },
+      { t: 42.0, text: "  -> Verified after_sha256 intact -> Restored exact original baseline (8fa16cebe4a9...)", color: "#22c55e" },
+      { t: 45.0, text: "# Out-of-band concurrent edit touches service_config.py before Proposal #2 is applied:", color: "#94a3b8" },
+      { t: 46.8, text: "$ hermes hunk-desk apply 2", color: "#38bdf8" },
+      { t: 48.2, text: "  [DRIFTED_REVOKED] Baseline SHA-256 changed on disk! All hunk approvals automatically revoked.", color: "#ef4444" }
+    ],
+    cards: [
+      { title: "Selective Hunk Application", desc: "Approve Hunk #1 (TIMEOUT=30) while rejecting Hunk #2 (DEBUG=True)", tag: "APPLIED: HUNK #1", active: true },
+      { title: "SHA-256 Baseline Drift Guard", desc: "Concurrent edits invalidate stale approvals before touching disk", tag: "DRIFT REVOKED", active: true },
+      { title: "SQLite Rollback Receipts", desc: "Every write_file/patch & hunk apply logs a drift-checked receipt", tag: "RECEIPT #1 RESTORED", active: true }
+    ]
+  },
+  {
+    start: 52, end: 69,
+    chapter: "04 / PLUGIN 3: SOURCE-TRAIL-SUPERVISOR",
+    title: "Exact Unicode `[start, end)` Span Citations, Contradiction Gate & Loop Supervisor",
+    subtitle: "Epistemic Verification Tools + `post_tool_call` Progress Fingerprinting + Bundled Skill",
+    caption: "Plugin 3 enforces epistemic discipline: it rejects paraphrased quote spans, withholds unilateral claims when sources conflict on the same topic, and fingerprints tool loops to pivot stuck sessions.",
+    pillColor: "#f59e0b",
+    terminalTitle: "hermes trail-supervise [verify | overview]",
+    lines: [
+      { t: 52.5, text: "$ source_trail_ingest(packet_id='pkt-bad', quote='Paraphrased limit', span=[0, 20])", color: "#38bdf8" },
+      { t: 54.2, text: "  [VALIDATION_FAILED] Anchor 'a1' mismatch at doc1[0:20]: expected 'Standard API tier al'", color: "#ef4444" },
+      { t: 56.8, text: "$ hermes trail-supervise verify pkt-rate-conflict  # doc1='60_rpm' vs doc2='10_rpm'", color: "#38bdf8" },
+      { t: 58.6, text: "  [WITHHELD_CONTRADICTION] Topic 'standard_tier_rpm' has conflicting verified positions!", color: "#f59e0b" },
+      { t: 60.0, text: "  -> accepted_claims: [] | disagreement_review_list: [{topic: 'standard_tier_rpm', positions: ['10_rpm','60_rpm']}]", color: "#e2e8f0" },
+      { t: 62.5, text: "[Hook: post_tool_call] 3x identical failing fingerprint '8c3b20e277fd4de5' (pytest ConnectionRefused)", color: "#ef4444" },
+      { t: 64.5, text: "$ hermes trail-supervise overview --session demo-loop", color: "#38bdf8" },
+      { t: 66.0, text: "  [STUCK DETECTED] Logged Decision Node #1 -> Remedy: Switch to alternative_branch (local mock server)", color: "#22c55e" }
+    ],
+    cards: [
+      { title: "Unicode [start, end) Verifier", desc: "Checks source[start:end] === quote character-for-character", tag: "SPAN VERIFIED", active: true },
+      { title: "Deterministic Contradiction Gate", desc: "Withholds unilateral claims when valid sources disagree on a topic", tag: "WITHHELD_CONTRADICTION", active: true },
+      { title: "Progress Fingerprint Supervisor", desc: "Detects N-repeat & ABAB loops; records causal recovery nodes", tag: "NODE #1 PIVOTED", active: true }
+    ]
+  },
+  {
+    start: 69, end: 75,
+    chapter: "05 / READY FOR HERMES CATALOG",
+    title: "Open Source, Zero Dependencies, 100% Catalog Rule Compliant",
+    subtitle: "github.com/misakamikotoghr-5205/hermes-hackathon-plugins  •  @NousResearch",
+    caption: "All three plugins use pure Python 3.11+ stdlib and profile-scoped SQLite storage, and are submitted to the official NousResearch/hermes-agent plugin catalog.",
+    pillColor: "#38bdf8",
+    terminalTitle: "Install in Hermes Agent today",
+    lines: [
+      { t: 69.3, text: "$ hermes plugins install claim-market-router", color: "#22c55e" },
+      { t: 70.1, text: "$ hermes plugins install hunk-consent-guard", color: "#22c55e" },
+      { t: 70.9, text: "$ hermes plugins install source-trail-supervisor", color: "#22c55e" },
+      { t: 72.0, text: "# Repo: https://github.com/misakamikotoghr-5205/hermes-hackathon-plugins", color: "#38bdf8" },
+      { t: 72.8, text: "# Built for the @NousResearch Hermes Agent Plugin Hackathon!", color: "#a855f7" }
+    ],
+    cards: [
+      { title: "claim-market-router", desc: "plugin-catalog/claim-market-router.yaml", tag: "PINNED SHA VERIFIED", active: true },
+      { title: "hunk-consent-guard", desc: "plugin-catalog/hunk-consent-guard.yaml", tag: "PINNED SHA VERIFIED", active: true },
+      { title: "source-trail-supervisor", desc: "plugin-catalog/source-trail-supervisor.yaml", tag: "PINNED SHA VERIFIED", active: true }
+    ]
+  }
+];
+
+function formatTime(sec) {
+  const m = Math.floor(sec / 60);
+  const s = Math.floor(sec % 60);
+  return `${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
+}
+
+function roundRect(ctx, x, y, w, h, r) {
+  ctx.beginPath();
+  ctx.moveTo(x + r, y);
+  ctx.arcTo(x + w, y, x + w, y + h, r);
+  ctx.arcTo(x + w, y + h, x, y + h, r);
+  ctx.arcTo(x, y + h, x, y, r);
+  ctx.arcTo(x, y, x + w, y, r);
+  ctx.closePath();
+}
+
+function renderScene(t) {
+  const scene = SCENES.find(s => t >= s.start && t < s.end) || SCENES[SCENES.length - 1];
+  captionText.textContent = scene.caption;
+
+  // Background gradient
+  const grad = ctx.createLinearGradient(0, 0, 1280, 720);
+  grad.addColorStop(0, "#070a12");
+  grad.addColorStop(1, "#0f172a");
+  ctx.fillStyle = grad;
+  ctx.fillRect(0, 0, 1280, 720);
+
+  // Subtle grid
+  ctx.strokeStyle = "rgba(148, 163, 184, 0.05)";
+  ctx.lineWidth = 1;
+  for (let x = 0; x < 1280; x += 40) {
+    ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, 720); ctx.stroke();
+  }
+  for (let y = 0; y < 720; y += 40) {
+    ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(1280, y); ctx.stroke();
+  }
+
+  // Header Pill
+  ctx.fillStyle = scene.pillColor + "22";
+  ctx.strokeStyle = scene.pillColor;
+  ctx.lineWidth = 1.5;
+  roundRect(ctx, 48, 34, 340, 30, 15);
+  ctx.fill(); ctx.stroke();
+
+  ctx.fillStyle = scene.pillColor;
+  ctx.font = "bold 13px Inter, sans-serif";
+  ctx.fillText(scene.chapter, 66, 54);
+
+  // Top-right clock badge
+  ctx.fillStyle = "#1e293b";
+  roundRect(ctx, 1080, 34, 152, 32, 8);
+  ctx.fill();
+  ctx.fillStyle = "#38bdf8";
+  ctx.font = "bold 14px monospace";
+  ctx.fillText(`⏱ ${formatTime(t)} / 01:15`, 1098, 55);
+
+  // Main Title & Subtitle
+  ctx.fillStyle = "#f8fafc";
+  ctx.font = "bold 28px Inter, sans-serif";
+  ctx.fillText(scene.title, 48, 104);
+
+  ctx.fillStyle = "#94a3b8";
+  ctx.font = "16px Inter, sans-serif";
+  ctx.fillText(scene.subtitle, 48, 134);
+
+  // Left Terminal Window
+  const termX = 48, termY = 162, termW = 790, termH = 440;
+  ctx.fillStyle = "#090d16";
+  ctx.strokeStyle = "#334155";
+  ctx.lineWidth = 1.5;
+  roundRect(ctx, termX, termY, termW, termH, 12);
+  ctx.fill(); ctx.stroke();
+
+  // Terminal Header
+  ctx.fillStyle = "#131c2e";
+  roundRect(ctx, termX, termY, termW, 38, 12);
+  ctx.fill();
+
+  // Traffic dots
+  const dots = ["#ef4444", "#f59e0b", "#22c55e"];
+  dots.forEach((c, idx) => {
+    ctx.fillStyle = c;
+    ctx.beginPath();
+    ctx.arc(termX + 22 + idx * 18, termY + 19, 6, 0, Math.PI * 2);
+    ctx.fill();
+  });
+
+  ctx.fillStyle = "#cbd5e1";
+  ctx.font = "bold 13px monospace";
+  ctx.fillText(scene.terminalTitle, termX + 86, termY + 24);
+
+  // Render Terminal Lines with typewriter reveal
+  ctx.font = "14px 'Consolas', 'Courier New', monospace";
+  let lineY = termY + 72;
+  scene.lines.forEach(l => {
+    if (t >= l.t) {
+      const elapsed = t - l.t;
+      const chars = Math.min(l.text.length, Math.floor(elapsed * 95));
+      const visible = l.text.slice(0, chars);
+      ctx.fillStyle = l.color;
+      // Wrap if > 86 chars
+      if (visible.length <= 86) {
+        ctx.fillText(visible, termX + 22, lineY);
+        lineY += 36;
+      } else {
+        ctx.fillText(visible.slice(0, 86), termX + 22, lineY);
+        ctx.fillText("   " + visible.slice(86), termX + 22, lineY + 22);
+        lineY += 54;
+      }
+    }
+  });
+
+  // Right Architecture Cards
+  const cardX = 862, cardW = 370;
+  scene.cards.forEach((c, i) => {
+    const cardY = 162 + i * 150;
+    ctx.fillStyle = c.active ? "#111c33" : "#0b1120";
+    ctx.strokeStyle = c.active ? scene.pillColor : "#1e293b";
+    ctx.lineWidth = c.active ? 2 : 1;
+    roundRect(ctx, cardX, cardY, cardW, 134, 12);
+    ctx.fill(); ctx.stroke();
+
+    // Tag pill
+    ctx.fillStyle = scene.pillColor + "28";
+    roundRect(ctx, cardX + 18, cardY + 16, 175, 24, 6);
+    ctx.fill();
+    ctx.fillStyle = scene.pillColor;
+    ctx.font = "bold 11px Inter, sans-serif";
+    ctx.fillText(c.tag, cardX + 28, cardY + 32);
+
+    ctx.fillStyle = "#f8fafc";
+    ctx.font = "bold 16px Inter, sans-serif";
+    ctx.fillText(c.title, cardX + 18, cardY + 66);
+
+    ctx.fillStyle = "#94a3b8";
+    ctx.font = "13px Inter, sans-serif";
+    const words = c.desc.split(" ");
+    let line1 = "", line2 = "";
+    words.forEach(w => {
+      if ((line1 + " " + w).length < 46) line1 += (line1 ? " " : "") + w;
+      else line2 += (line2 ? " " : "") + w;
+    });
+    ctx.fillText(line1, cardX + 18, cardY + 92);
+    if (line2) ctx.fillText(line2, cardX + 18, cardY + 112);
+  });
+
+  // Bottom Subtitle Bar inside Canvas (so exported video includes subtitles!)
+  ctx.fillStyle = "rgba(15, 23, 42, 0.92)";
+  ctx.strokeStyle = "#334155";
+  roundRect(ctx, 48, 622, 1184, 58, 10);
+  ctx.fill(); ctx.stroke();
+
+  ctx.fillStyle = "#e2e8f0";
+  ctx.font = "15px Inter, sans-serif";
+  ctx.fillText("💬 " + scene.caption, 68, 656);
+
+  // Progress bar at very bottom of canvas
+  ctx.fillStyle = "#1e293b";
+  ctx.fillRect(0, 712, 1280, 8);
+  ctx.fillStyle = scene.pillColor;
+  ctx.fillRect(0, 712, (t / DURATION) * 1280, 8);
+}
+
+function loop(now) {
+  const dt = (now - lastFrameTs) / 1000;
+  lastFrameTs = now;
+  if (isPlaying) {
+    currentTime += dt;
+    if (currentTime >= DURATION) {
+      currentTime = DURATION;
+      isPlaying = false;
+      playPauseBtn.textContent = "▶ Play";
+      if (mediaRecorder && mediaRecorder.state === "recording") {
+        mediaRecorder.stop();
+      }
+    }
+    scrubber.value = currentTime;
+    timeLabel.textContent = `${formatTime(currentTime)} / 01:15`;
+  }
+  renderScene(currentTime);
+  requestAnimationFrame(loop);
+}
+
+playPauseBtn.addEventListener('click', () => {
+  if (currentTime >= DURATION) currentTime = 0;
+  isPlaying = !isPlaying;
+  playPauseBtn.textContent = isPlaying ? "⏸ Pause" : "▶ Play";
+});
+
+restartBtn.addEventListener('click', () => {
+  currentTime = 0;
+  isPlaying = true;
+  playPauseBtn.textContent = "⏸ Pause";
+});
+
+scrubber.addEventListener('input', (e) => {
+  currentTime = parseFloat(e.target.value);
+  timeLabel.textContent = `${formatTime(currentTime)} / 01:15`;
+  renderScene(currentTime);
+});
+
+document.querySelectorAll('.chapter-btn').forEach(btn => {
+  btn.addEventListener('click', () => {
+    currentTime = parseFloat(btn.dataset.t);
+    isPlaying = true;
+    playPauseBtn.textContent = "⏸ Pause";
+  });
+});
+
+// WebM Video Export via MediaRecorder
+let mediaRecorder = null;
+let recordedChunks = [];
+
+recordBtn.addEventListener('click', () => {
+  if (mediaRecorder && mediaRecorder.state === "recording") {
+    mediaRecorder.stop();
+    return;
+  }
+  recordedChunks = [];
+  currentTime = 0;
+  isPlaying = true;
+  playPauseBtn.textContent = "⏸ Pause";
+  const stream = canvas.captureStream(30);
+  const mime = MediaRecorder.isTypeSupported('video/webm;codecs=vp9')
+    ? 'video/webm;codecs=vp9'
+    : 'video/webm';
+  mediaRecorder = new MediaRecorder(stream, { mimeType: mime, videoBitsPerSecond: 4000000 });
+  mediaRecorder.ondataavailable = (e) => {
+    if (e.data && e.data.size > 0) recordedChunks.push(e.data);
+  };
+  mediaRecorder.onstop = () => {
+    recordBtn.classList.remove('recording');
+    recordBtn.textContent = "⏺ Export 75s Video (.webm)";
+    const blob = new Blob(recordedChunks, { type: mime });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'hermes-hackathon-plugins-demo-75s.webm';
+    a.click();
+  };
+  mediaRecorder.start(200);
+  recordBtn.classList.add('recording');
+  recordBtn.textContent = "⏹ Stop & Download (.webm)";
+});
+
+requestAnimationFrame(loop);
+</script>
+</body>
+</html>
