@@ -34,8 +34,10 @@ delegation:
       candidates:
         - name: scout-fast
           provider: openrouter
-          model: google/gemini-2.5-flash
+          model: google/gemini-3.8-flash
           reasoning_effort: low
+          service_tier: fast
+          fallback_providers: [deepseek/deepseek-v4.1-flash, z-ai/glm-5.3-flashx]
           cost_units: 1.0
           quality_tier: 2
           preferred_roles: [explorer, implementer]
@@ -43,8 +45,10 @@ delegation:
           window_quota_tokens: 300000
         - name: builder-balanced
           provider: openrouter
-          model: anthropic/claude-sonnet-4
+          model: anthropic/claude-sonnet-5.5
           reasoning_effort: medium
+          service_tier: normal
+          fallback_providers: [openai/gpt-6.1-sol, moonshotai/kimi-k3]
           cost_units: 3.5
           quality_tier: 4
           preferred_roles: [implementer, verifier]
@@ -52,8 +56,10 @@ delegation:
           window_quota_tokens: 200000
         - name: arbiter-frontier
           provider: openrouter
-          model: openai/gpt-5
+          model: openai/gpt-6-astra-pro
           reasoning_effort: high
+          service_tier: fast
+          fallback_providers: [anthropic/claude-opus-5.5, google/gemini-4-argon]
           cost_units: 8.0
           quality_tier: 5
           preferred_roles: [verifier, finalizer]

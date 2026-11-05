@@ -229,19 +229,19 @@ const SCENES = [
     terminalTitle: "hermes claim-market auction & llm_request middleware",
     lines: [
       { t: 8.5, text: "$ hermes claim-market auction 'Scan workspace test entrypoints' --role explorer --complexity 1", color: "#38bdf8" },
-      { t: 10.2, text: "  -> Winner: scout-fast (google/gemini-2.5-flash, cost=1.0, mode=direct_agreement)", color: "#22c55e" },
-      { t: 11.4, text: "  -> Independent Verifier Nominated: arbiter-frontier (openai/gpt-5)", color: "#94a3b8" },
+      { t: 10.2, text: "  -> Winner: scout-fast (google/gemini-3.8-flash, tier=fast, cost=1.0, mode=direct_agreement)", color: "#22c55e" },
+      { t: 11.4, text: "  -> Independent Verifier Nominated: arbiter-frontier (openai/gpt-6-astra-pro)", color: "#94a3b8" },
       { t: 13.5, text: "$ hermes claim-market auction 'Audit formal safety invariants' --role finalizer --complexity 5", color: "#38bdf8" },
-      { t: 15.2, text: "  -> Winner: arbiter-frontier (openai/gpt-5, cost=8.0, claim_confidence=1.00)", color: "#22c55e" },
+      { t: 15.2, text: "  -> Winner: arbiter-frontier (openai/gpt-6-astra-pro, fallbacks=[claude-opus-5.5, gemini-4-argon])", color: "#22c55e" },
       { t: 17.8, text: "$ hermes claim-market auction 'Build consensus engine' --role implementer --max-cost 0.25", color: "#38bdf8" },
       { t: 19.5, text: "  [INFEASIBLE] All 3 routes filtered. Sensitivity: raise max_cost_units by +0.75 (to 1.0).", color: "#f59e0b" },
-      { t: 23.0, text: "[Hook: post_api_request] Recorded 95,000 / 100,000 rolling window tokens -> shadow_price λ = 0.237", color: "#a855f7" },
+      { t: 23.0, text: "[Hook: post_api_request + on_delegation] 95,000 / 100,000 window tokens -> shadow_price λ = 0.237", color: "#a855f7" },
       { t: 25.0, text: "[Middleware: llm_request] Exploratory turn (1 msg) & λ >= 0.20 -> shaped reasoning_effort='low'", color: "#22c55e" }
     ],
     cards: [
-      { title: "scout-fast (Gemini 2.5 Flash)", desc: "Cost: 1.0u | Fit(explorer): 1.00 | Wins low-complexity exploration", tag: "WINNER: EXPLORER", active: true },
-      { title: "builder-balanced (Claude Sonnet 4)", desc: "Cost: 3.5u | Vote weight: 1.4 | Balanced implementer & verifier", tag: "CANDIDATE", active: false },
-      { title: "arbiter-frontier (GPT-5 High)", desc: "Cost: 8.0u | Quality Tier: 5 | Wins finalizer & verifies claims", tag: "WINNER: FINALIZER", active: true }
+      { title: "scout-fast (Gemini 3.8 Flash)", desc: "Cost: 1.0u | service_tier: fast | Fallbacks: deepseek-v4.1-flash", tag: "WINNER: EXPLORER", active: true },
+      { title: "builder-balanced (Claude Sonnet 5.5)", desc: "Cost: 3.5u | Vote weight: 1.4 | Fallbacks: gpt-6.1-sol, kimi-k3", tag: "CANDIDATE", active: false },
+      { title: "arbiter-frontier (GPT-6 Astra Pro)", desc: "Cost: 8.0u | Quality Tier: 5 | Fallbacks: claude-opus-5.5, gemini-4-argon", tag: "WINNER: FINALIZER", active: true }
     ]
   },
   {

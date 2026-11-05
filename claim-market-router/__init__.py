@@ -45,6 +45,11 @@ def _on_post_llm_call(**kwargs: Any) -> None:
         logger.debug("claim-market-router post_llm_call error: %s", exc)
 
 
+def _on_delegation(**kwargs: Any) -> None:
+    """Observer hook (`on_delegation`): record subagent delegation token usage if reported."""
+    _on_post_llm_call(**kwargs)
+
+
 def _make_llm_request_middleware(ctx: Any):
     """Build the llm_request middleware closure bound to this plugin's config."""
 
@@ -144,6 +149,7 @@ def register(ctx: Any) -> None:
     )
     ctx.register_hook("post_llm_call", _on_post_llm_call)
     ctx.register_hook("post_api_request", _on_post_llm_call)
+    ctx.register_hook("on_delegation", _on_delegation)
     ctx.register_middleware("llm_request", _make_llm_request_middleware(ctx))
 
     if hasattr(ctx, "register_delegation_provider"):

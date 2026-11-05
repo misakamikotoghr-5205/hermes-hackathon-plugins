@@ -88,12 +88,22 @@ class ClaimMarketDelegationProvider(DelegationProvider):
 
         winner = decision["winner"]
         route: dict[str, Any] = {}
-        for key in ("model", "provider", "base_url", "api_mode", "reasoning_effort", "service_tier", "profile"):
+        for key in (
+            "model",
+            "provider",
+            "base_url",
+            "api_mode",
+            "reasoning_effort",
+            "service_tier",
+            "fallback_providers",
+            "request_overrides",
+            "profile",
+        ):
             if winner.get(key):
                 route[key] = winner[key]
 
         route["label"] = (
             f"{winner['name']} [{decision['resolution_mode']}, conf={decision['confidence']:.2f}, "
-            f"verifier={decision['recommended_verifier']}]"
+            f"tier={winner.get('service_tier') or 'normal'}, verifier={decision['recommended_verifier']}]"
         )
         return route

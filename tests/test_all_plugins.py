@@ -113,13 +113,13 @@ class TestHermesHackathonPlugins(unittest.TestCase):
         pkg.register(ctx)
 
         self.assertEqual(set(ctx.tools.keys()), {"claim_market_auction", "claim_market_ledger"})
-        self.assertEqual(set(ctx.hooks.keys()), {"post_llm_call", "post_api_request"})
+        self.assertEqual(set(ctx.hooks.keys()), {"post_llm_call", "post_api_request", "on_delegation"})
         self.assertEqual(set(ctx.middleware.keys()), {"llm_request"})
         self.assertEqual(len(ctx.delegation_providers), 1)
         for t in ctx.tools.values():
             self._assert_handler_contract(t["handler"])
 
-        # 1. Explorer task -> should select cheap fast route
+        # 1. Explorer task -> should select cheap fast route (google/gemini-3.8-flash)
         auction_fn = ctx.tools["claim_market_auction"]["handler"]
         res_explore = json.loads(
             auction_fn({"goal": "Scan repo directory names", "role_needed": "explorer", "complexity": 1})
@@ -127,14 +127,17 @@ class TestHermesHackathonPlugins(unittest.TestCase):
         self.assertTrue(res_explore["ok"])
         self.assertTrue(res_explore["feasible"])
         self.assertEqual(res_explore["winner"]["name"], "scout-fast")
+        self.assertEqual(res_explore["winner"]["model"], "google/gemini-3.8-flash")
+        self.assertEqual(res_explore["winner"]["service_tier"], "fast")
         self.assertNotEqual(res_explore["recommended_verifier"], "scout-fast")
 
-        # 2. Finalizer high-complexity task -> should select frontier route
+        # 2. Finalizer high-complexity task -> should select frontier route (openai/gpt-6-astra-pro)
         res_final = json.loads(
             auction_fn({"goal": "Verify formal safety invariant", "role_needed": "finalizer", "complexity": 5})
         )
         self.assertTrue(res_final["ok"])
         self.assertEqual(res_final["winner"]["name"], "arbiter-frontier")
+        self.assertEqual(res_final["winner"]["model"], "openai/gpt-6-astra-pro")
 
         # 3. Infeasible cost ceiling -> should return explainable sensitivity report
         res_infeasible = json.loads(
@@ -151,7 +154,7 @@ class TestHermesHackathonPlugins(unittest.TestCase):
         self.assertFalse(res_infeasible["feasible"])
         self.assertIn("Sensitivity:", res_infeasible["infeasibility_report"])
 
-        # 4. DelegationProvider route_task contract & llm_request middleware
+        # 4. DelegationProvider route_task contract (including service_tier & fallback_providers) & llm_request middleware
         provider = ctx.delegation_providers[0]
         self.assertEqual(provider.name, "claim_market")
         route = provider.route_task(
@@ -159,18 +162,20 @@ class TestHermesHackathonPlugins(unittest.TestCase):
             {},
         )
         self.assertIn("model", route)
+        self.assertIn("service_tier", route)
+        self.assertIn("fallback_providers", route)
         self.assertIn("label", route)
 
-        # Record high token usage via post_llm_call hook and verify llm_request middleware shapes effort
-        hook_fn = ctx.hooks["post_llm_call"][0]
+        # Record high token usage via post_api_request hook and verify llm_request middleware shapes effort
+        hook_fn = ctx.hooks["post_api_request"][0]
         hook_fn(
             session_id="s1",
             provider="openrouter",
-            model="openai/gpt-5",
+            model="openai/gpt-6-astra-pro",
             usage={"prompt_tokens": 60000, "completion_tokens": 35000, "total_tokens": 95000},
         )
         mw_fn = ctx.middleware["llm_request"][0]
-        mw_out = mw_fn(request={"model": "openai/gpt-5", "messages": [{"role": "user", "content": "hi"}]})
+        mw_out = mw_fn(request={"model": "openai/gpt-6-astra-pro", "messages": [{"role": "user", "content": "hi"}]})
         self.assertEqual(mw_out["request"]["reasoning_effort"], "low")
         self.assertEqual(mw_out["source"], "claim-market-router")
 

@@ -1,0 +1,20 @@
+{
+  "name": "hermes-hackathon-remotion-demo",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Remotion 1080p 30fps showcase video for the Nous Research Hermes Agent Plugin Hackathon",
+  "scripts": {
+    "studio": "remotion studio",
+    "render": "remotion render src/index.ts HermesHackathonShowcase out/hermes_hackathon_remotion_75s.mp4"
+  },
+  "dependencies": {
+    "@remotion/cli": "4.0.242",
+    "react": "18.3.1",
+    "react-dom": "18.3.1",
+    "remotion": "4.0.242"
+  },
+  "devDependencies": {
+    "@types/react": "18.3.12",
+    "typescript": "5.6.3"
+  }
+}

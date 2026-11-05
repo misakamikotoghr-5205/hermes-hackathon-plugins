@@ -53,7 +53,7 @@ def main() -> int:
         )
         print(
             f"[1a] Explorer Task (complexity=1) -> Winner: {r1['winner']['name']} "
-            f"({r1['winner']['model']}, cost={r1['winner']['cost_units']}, "
+            f"({r1['winner']['model']}, tier={r1['winner']['service_tier']}, cost={r1['winner']['cost_units']}, "
             f"mode={r1['resolution_mode']}, verifier={r1['recommended_verifier']})"
         )
 
@@ -68,7 +68,7 @@ def main() -> int:
         )
         print(
             f"[1b] Finalizer Task (complexity=5) -> Winner: {r2['winner']['name']} "
-            f"({r2['winner']['model']}, cost={r2['winner']['cost_units']}, "
+            f"({r2['winner']['model']}, fallbacks={r2['winner']['fallback_providers']}, "
             f"confidence={r2['winner']['claim_confidence']})"
         )
 
@@ -88,11 +88,11 @@ def main() -> int:
         cm_ctx.hooks["post_api_request"][0](
             session_id="demo-s1",
             provider="openrouter",
-            model="openai/gpt-5",
+            model="openai/gpt-6-astra-pro",
             usage={"prompt_tokens": 60000, "completion_tokens": 35000, "total_tokens": 95000},
         )
         mw_res = cm_ctx.middleware["llm_request"][0](
-            request={"model": "openai/gpt-5", "messages": [{"role": "user", "content": "list files"}]}
+            request={"model": "openai/gpt-6-astra-pro", "messages": [{"role": "user", "content": "list files"}]}
         )
         print(
             f"[1d] llm_request Middleware after 95k/100k tokens -> "
