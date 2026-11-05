@@ -1,0 +1,38 @@
+name: hunk-consent-guard
+version: 1.0.0
+manifest_version: 2
+api_version: 1
+requires_hermes: ">=0.21.5"
+author: misakamikotoghr-5205
+license: MIT
+homepage: https://github.com/misakamikotoghr-5205/hermes-hackathon-plugins
+description: >-
+  Per-hunk patch staging, SHA-256 baseline-drift approval revocation, and
+  drift-checked rollback receipts for workspace file edits.
+tags:
+  - tools
+  - patch
+  - review
+  - rollback
+  - safety
+  - receipts
+provides_tools:
+  - hunk_propose
+  - hunk_review_status
+  - hunk_apply_approved
+  - hunk_rollback_receipt
+provides_hooks:
+  - post_tool_call
+provides_middleware:
+  - tool_execution
+config_schema:
+  record_all_writes:
+    type: bool
+    default: true
+    label: "Record rollback receipts for all write_file/patch calls"
+    description: "Capture before/after SHA-256 snapshots in SQLite during tool_execution middleware"
+  max_snapshot_kb:
+    type: int
+    default: 256
+    label: "Max file size for full text rollback snapshot (KB)"
+    description: "Files larger than this record SHA-256 hashes only"

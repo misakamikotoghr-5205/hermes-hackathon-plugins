@@ -1,0 +1,37 @@
+name: source-trail-supervisor
+version: 1.0.0
+manifest_version: 2
+api_version: 1
+requires_hermes: ">=0.21.5"
+author: misakamikotoghr-5205
+license: MIT
+homepage: https://github.com/misakamikotoghr-5205/hermes-hackathon-plugins
+description: >-
+  Exact Unicode span citation verifier, deterministic contradiction gate, and
+  progress-fingerprint stuck-session supervisor with causal decision nodes.
+tags:
+  - epistemics
+  - citations
+  - verification
+  - supervisor
+  - debugging
+  - skills
+provides_tools:
+  - source_trail_ingest
+  - source_trail_verify
+  - session_supervisor_node
+provides_hooks:
+  - on_session_start
+  - post_tool_call
+  - post_llm_call
+config_schema:
+  stuck_threshold:
+    type: int
+    default: 4
+    label: "Stuck loop threshold (turns)"
+    description: "Number of consecutive turns with repeating failure/action fingerprints before flagging session as stuck"
+  strict_quote_match:
+    type: bool
+    default: true
+    label: "Strict verbatim Unicode span match"
+    description: "Require source[start:end] to match quote character-for-character without whitespace normalization"

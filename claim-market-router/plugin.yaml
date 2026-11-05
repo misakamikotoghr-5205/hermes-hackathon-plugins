@@ -1,0 +1,42 @@
+name: claim-market-router
+version: 1.0.0
+manifest_version: 2
+api_version: 1
+requires_hermes: ">=0.22.5"
+author: misakamikotoghr-5205
+license: MIT
+homepage: https://github.com/misakamikotoghr-5205/hermes-hackathon-plugins
+description: >-
+  Cost-aware, quota-aware claim market and weighted-voting router for subagent
+  delegation and turn-level reasoning effort shaping, with shadow prices and
+  explainable infeasibility reports.
+tags:
+  - models
+  - routing
+  - delegation
+  - quota
+  - cost-optimization
+provides_tools:
+  - claim_market_auction
+  - claim_market_ledger
+provides_hooks:
+  - post_llm_call
+  - post_api_request
+provides_middleware:
+  - llm_request
+config_schema:
+  auto_effort_shaping:
+    type: bool
+    default: false
+    label: "Auto-shape reasoning effort"
+    description: "Adjust reasoning_effort in llm_request middleware based on turn phase and quota shadow price"
+  agreement_margin:
+    type: float
+    default: 0.08
+    label: "Agreement margin"
+    description: "Score margin within which initial score and top claim agree without weighted voting"
+  window_budget_tokens:
+    type: int
+    default: 500000
+    label: "Rolling window token budget"
+    description: "Soft token budget per rolling 24h window used to compute route shadow prices"
