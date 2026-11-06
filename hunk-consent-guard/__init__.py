@@ -2,7 +2,7 @@
 
 Registers:
 - Tools (`hunk_propose`, `hunk_review_status`, `hunk_apply_approved`, `hunk_rollback_receipt`)
-- Hook (`post_tool_call`)
+- Hooks (`pre_tool_call`, `post_tool_call`)
 - Middleware (`tool_execution`)
 - Slash command (`/hunk-desk`) and CLI command (`hermes hunk-desk`)
 """
@@ -15,7 +15,14 @@ from pathlib import Path
 from typing import Any
 
 from . import schemas, tools
-from .engine import record_direct_write_receipt
+from .engine import (
+    bind_plugin_context,
+    check_and_update_Approvals,
+    check_file_safety,
+    is_in_internal_write,
+    record_direct_write_receipt,
+    resolve_workspace_path,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -38,8 +45,12 @@ def _make_tool_execution_middleware(ctx: Any):
         tool_name = str(kwargs.get("tool_name") or "")
         args = kwargs.get("args")
         next_call = kwargs.get("next_call")
+        task_id = str(kwargs.get("task_id") or "default")
         if not callable(next_call):
             return None
+
+        if is_in_internal_write():
+            return next_call(args)
 
         try:
             record_all = bool(ctx.get_config("record_all_writes", default=True))
@@ -48,16 +59,24 @@ def _make_tool_execution_middleware(ctx: Any):
             record_all = True
             max_kb = 256
 
-        target_path_str = _extract_target_path(args) if (record_all and tool_name in _WRITE_TOOLS and isinstance(args, dict)) else None
+        target_path_str = (
+            _extract_target_path(args)
+            if (record_all and tool_name in _WRITE_TOOLS and isinstance(args, dict))
+            else None
+        )
         before_text: str | None = None
         resolved_path: Path | None = None
 
         if target_path_str:
             try:
-                resolved_path = Path(target_path_str).expanduser().resolve()
-                before_text = resolved_path.read_text(encoding="utf-8") if resolved_path.exists() else ""
+                if check_file_safety(target_path_str, None, check_read=True, check_write=True) is None:
+                    cand_path = resolve_workspace_path(target_path_str, task_id=task_id)
+                    if check_file_safety(target_path_str, cand_path, check_read=True, check_write=True) is None:
+                        resolved_path = cand_path
+                        before_text = resolved_path.read_text(encoding="utf-8") if resolved_path.exists() else ""
             except Exception:
                 before_text = None
+                resolved_path = None
 
         result = next_call(args)
 
@@ -70,6 +89,7 @@ def _make_tool_execution_middleware(ctx: Any):
                     before_text=before_text,
                     after_text=after_text,
                     max_snapshot_kb=max_kb,
+                    task_id=task_id,
                 )
             except Exception as exc:
                 logger.debug("hunk-consent-guard receipt capture skipped: %s", exc)
@@ -77,6 +97,20 @@ def _make_tool_execution_middleware(ctx: Any):
         return result
 
     return _on_tool_execution
+
+
+def _on_pre_tool_call(**kwargs: Any) -> dict[str, Any] | None:
+    """Gate model-initiated hunk_apply_approved calls through Hermes's human approval prompt."""
+    tool_name = str(kwargs.get("tool_name") or "")
+    args = kwargs.get("args") if isinstance(kwargs.get("args"), dict) else {}
+    if tool_name == "hunk_apply_approved":
+        pid = args.get("proposal_id")
+        return {
+            "action": "approve",
+            "message": f"Apply approved hunks for staged proposal #{pid}?",
+            "rule_key": "hunk-consent-guard:apply",
+        }
+    return None
 
 
 def _on_post_tool_call(**kwargs: Any) -> None:
@@ -102,7 +136,12 @@ def _handle_slash_command(raw_args: str) -> str:
     if cmd == "approve" and len(tokens) >= 3:
         pid = int(tokens[1])
         hunk_ids = [int(x.strip()) for x in tokens[2].split(",") if x.strip()]
-        return tools.hunk_review_status({"proposal_id": pid, "approve_hunks": hunk_ids})
+        res = check_and_update_Approvals(proposal_id=pid, approve_hunks=hunk_ids)
+        return json.dumps(res, ensure_ascii=False)
+    if cmd == "revoke" and len(tokens) >= 2:
+        pid = int(tokens[1])
+        res = check_and_update_Approvals(proposal_id=pid, revoke_all=True)
+        return json.dumps(res, ensure_ascii=False)
     if cmd == "apply" and len(tokens) >= 2:
         return tools.hunk_apply_approved({"proposal_id": int(tokens[1])})
     if cmd == "rollback" and len(tokens) >= 2:
@@ -110,7 +149,7 @@ def _handle_slash_command(raw_args: str) -> str:
     return json.dumps(
         {
             "ok": False,
-            "usage": "/hunk-desk [list | status <id> | approve <id> <h1,h2> | apply <id> | rollback <receipt_id>]",
+            "usage": "/hunk-desk [list | status <id> | approve <id> <h1,h2> | revoke <id> | apply <id> | rollback <receipt_id>]",
         }
     )
 
@@ -123,6 +162,8 @@ def _register_cli(parser: Any) -> None:
     ap = sub.add_parser("approve", help="Approve comma-separated hunk IDs on a proposal")
     ap.add_argument("proposal_id", type=int)
     ap.add_argument("hunks", help="Comma-separated 1-based hunk IDs (e.g. 1,3)")
+    rv = sub.add_parser("revoke", help="Revoke all hunk approvals on a proposal")
+    rv.add_argument("proposal_id", type=int)
     apply_p = sub.add_parser("apply", help="Apply approved hunks on a proposal")
     apply_p.add_argument("proposal_id", type=int)
     rb = sub.add_parser("rollback", help="Roll back a file modification by receipt ID")
@@ -135,7 +176,11 @@ def _run_cli(args: Any) -> int:
         out = tools.hunk_review_status({"proposal_id": args.proposal_id})
     elif sub == "approve":
         ids = [int(x.strip()) for x in str(args.hunks).split(",") if x.strip()]
-        out = tools.hunk_review_status({"proposal_id": args.proposal_id, "approve_hunks": ids})
+        res = check_and_update_Approvals(proposal_id=int(args.proposal_id), approve_hunks=ids)
+        out = json.dumps(res, ensure_ascii=False)
+    elif sub == "revoke":
+        res = check_and_update_Approvals(proposal_id=int(args.proposal_id), revoke_all=True)
+        out = json.dumps(res, ensure_ascii=False)
     elif sub == "apply":
         out = tools.hunk_apply_approved({"proposal_id": args.proposal_id})
     elif sub == "rollback":
@@ -148,6 +193,8 @@ def _run_cli(args: Any) -> int:
 
 def register(ctx: Any) -> None:
     """Register hunk-consent-guard tools, hooks, middleware, and commands."""
+    bind_plugin_context(ctx)
+
     ctx.register_tool(
         name="hunk_propose",
         toolset="hunk-consent-guard",
@@ -173,6 +220,7 @@ def register(ctx: Any) -> None:
         handler=tools.hunk_rollback_receipt,
     )
 
+    ctx.register_hook("pre_tool_call", _on_pre_tool_call)
     ctx.register_hook("post_tool_call", _on_post_tool_call)
     ctx.register_middleware("tool_execution", _make_tool_execution_middleware(ctx))
 
@@ -180,7 +228,7 @@ def register(ctx: Any) -> None:
         ctx.register_command(
             "hunk-desk",
             _handle_slash_command,
-            description="Review, approve, apply, or roll back staged file hunks (/hunk-desk [list|status|approve|apply|rollback])",
+            description="Review, approve, apply, or roll back staged file hunks (/hunk-desk [list|status|approve|revoke|apply|rollback])",
         )
 
     if hasattr(ctx, "register_cli_command"):

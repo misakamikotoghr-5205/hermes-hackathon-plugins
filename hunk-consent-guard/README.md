@@ -6,11 +6,13 @@ Derived from [`patch-review-desk`](https://github.com/misakamikotoghr-5205/patch
 
 ## Core Safety Guarantees
 
-1. **Granular Per-Hunk Consent (`hunk_propose`, `hunk_review_status`):**
-   Stage a multi-hunk file edit without touching the working tree. Approve only a subset of hunks (e.g., hunks `1,3` out of `4`) via `/hunk-desk approve <proposal_id> 1,3` or `hunk_review_status`.
-2. **Automatic Baseline-Drift Revocation:**
+1. **User-Only Granular Per-Hunk Consent (`hunk_propose`, `hunk_review_status`, `/hunk-desk`):**
+   Stage a multi-hunk file edit without touching the working tree. Model-facing tools (`hunk_propose`, `hunk_review_status`) cannot approve hunks; approval comes exclusively from the user via `/hunk-desk approve <proposal_id> 1,3` or `hermes hunk-desk approve <proposal_id> 1,3`, and `hunk_apply_approved` also escalates through Hermes's `pre_tool_call` approval gate.
+2. **Core File-Safety Enforcement & `write_file` Dispatch:**
+   Relative paths are resolved against the terminal cwd (`resolve_agent_cwd()`), every read/stage check enforces `agent.file_safety.get_read_block_error` and `get_write_denied_error`, and all file writes dispatch through `ctx.dispatch_tool("write_file", ...)`.
+3. **Automatic Baseline-Drift Revocation:**
    Every proposal pins the target file's `baseline_sha256`. If the file on disk is modified out-of-band before `hunk_apply_approved` runs, `hunk-consent-guard` detects the SHA-256 drift, revokes all approvals (`status: "drifted_revoked"`), and refuses to overwrite the file.
-3. **Durable Rollback Receipts (`tool_execution` Middleware & `hunk_rollback_receipt`):**
+4. **Durable Rollback Receipts (`tool_execution` Middleware & `hunk_rollback_receipt`):**
    Every applied hunk proposal—and every `write_file`/`patch` call wrapped by `tool_execution` middleware—records a receipt with `before_sha256`, `after_sha256`, unified diff, and text snapshots in `<HERMES_HOME>/plugin-data/hunk-consent-guard/data.db`. Rolling back a receipt verifies that the current file still matches `after_sha256` before restoring `before_text`, so later edits are never clobbered.
 
 ## Installation

@@ -25,10 +25,6 @@ HUNK_PROPOSE = {
                 "type": "string",
                 "description": "Short rationale for the proposed changes.",
             },
-            "auto_approve_all": {
-                "type": "boolean",
-                "description": "If true, mark all hunks approved at creation (still protected by baseline-drift check on apply).",
-            },
         },
         "required": ["target_path", "proposed_text"],
     },
@@ -37,24 +33,16 @@ HUNK_PROPOSE = {
 HUNK_REVIEW_STATUS = {
     "name": "hunk_review_status",
     "description": (
-        "Inspect a staged hunk proposal, check whether its SHA-256 baseline on disk is still "
-        "intact (revoking approvals if drifted), and optionally approve or revoke specific hunk IDs."
+        "Read-only inspection of a staged hunk proposal and its SHA-256 baseline status on disk "
+        "(automatically revoking approvals if the file drifted). Hunk approval is user-only via "
+        "`/hunk-desk approve <id> <h1,h2>` or `hermes hunk-desk approve <id> <h1,h2>`."
     ),
     "parameters": {
         "type": "object",
         "properties": {
             "proposal_id": {
                 "type": "integer",
-                "description": "Proposal ID to inspect or update. Omit to list recent proposals and receipts.",
-            },
-            "approve_hunks": {
-                "type": "array",
-                "items": {"type": "integer"},
-                "description": "Optional list of 1-based hunk IDs to approve on this proposal.",
-            },
-            "revoke_all": {
-                "type": "boolean",
-                "description": "If true, clear all hunk approvals on this proposal.",
+                "description": "Proposal ID to inspect. Omit to list recent proposals and receipts.",
             },
         },
     },

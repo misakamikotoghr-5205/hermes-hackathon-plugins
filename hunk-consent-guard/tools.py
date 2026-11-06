@@ -21,11 +21,12 @@ def hunk_propose(args: dict[str, Any], **kwargs: Any) -> str:
         if not target_path or proposed_text is None:
             return json.dumps({"ok": False, "error": "Both 'target_path' and 'proposed_text' are required."})
 
+        task_id = str(kwargs.get("task_id") or "default")
         res = create_proposal(
             target_path=target_path,
             proposed_text=str(proposed_text),
             summary=str(args.get("summary") or ""),
-            auto_approve_all=bool(args.get("auto_approve_all", False)),
+            task_id=task_id,
         )
         return json.dumps(res, ensure_ascii=False)
     except Exception as exc:
@@ -39,12 +40,12 @@ def hunk_review_status(args: dict[str, Any], **kwargs: Any) -> str:
             overview = list_receipts_and_proposals(limit=15)
             return json.dumps({"ok": True, **overview}, ensure_ascii=False)
 
-        approve_hunks = args.get("approve_hunks")
-        revoke_all = bool(args.get("revoke_all", False))
+        # Model-facing tool is strictly read-only inspection (plus baseline-drift revocation).
+        # Hunk approval comes exclusively from the user via /hunk-desk approve or hermes hunk-desk approve.
         res = check_and_update_Approvals(
             proposal_id=int(proposal_id),
-            approve_hunks=approve_hunks if isinstance(approve_hunks, list) else None,
-            revoke_all=revoke_all,
+            approve_hunks=None,
+            revoke_all=False,
         )
         return json.dumps(res, ensure_ascii=False)
     except Exception as exc:

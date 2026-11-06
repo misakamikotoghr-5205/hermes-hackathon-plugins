@@ -47,6 +47,16 @@ class MockPluginContext:
         self.cli_commands: dict[str, dict[str, Any]] = {}
         self.skills: dict[str, str] = {}
         self.settings: dict[str, Any] = dict(settings or {})
+        self.dispatched_tools: list[tuple[str, dict[str, Any]]] = []
+
+    def dispatch_tool(self, tool_name: str, args: dict[str, Any], **kwargs: Any) -> str:
+        self.dispatched_tools.append((tool_name, dict(args)))
+        if tool_name == "write_file":
+            target = Path(str(args["path"]))
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_text(str(args["content"]), encoding="utf-8")
+            return json.dumps({"ok": True, "path": str(target)})
+        return json.dumps({"ok": True})
 
     def register_tool(self, *, name: str, toolset: str, schema: dict[str, Any], handler: Any, **kwargs: Any) -> None:
         self.tools[name] = {"toolset": toolset, "schema": schema, "handler": handler}
@@ -113,7 +123,7 @@ class TestHermesHackathonPlugins(unittest.TestCase):
         pkg.register(ctx)
 
         self.assertEqual(set(ctx.tools.keys()), {"claim_market_auction", "claim_market_ledger"})
-        self.assertEqual(set(ctx.hooks.keys()), {"post_llm_call", "post_api_request", "on_delegation"})
+        self.assertEqual(set(ctx.hooks.keys()), {"post_llm_call", "post_api_request"})
         self.assertEqual(set(ctx.middleware.keys()), {"llm_request"})
         self.assertEqual(len(ctx.delegation_providers), 1)
         for t in ctx.tools.values():
@@ -175,7 +185,18 @@ class TestHermesHackathonPlugins(unittest.TestCase):
             usage={"prompt_tokens": 60000, "completion_tokens": 35000, "total_tokens": 95000},
         )
         mw_fn = ctx.middleware["llm_request"][0]
-        mw_out = mw_fn(request={"model": "openai/gpt-6-astra-pro", "messages": [{"role": "user", "content": "hi"}]})
+        # Without reasoning_effort in request, key should not be added
+        mw_no_key = mw_fn(request={"model": "openai/gpt-6-astra-pro", "messages": [{"role": "user", "content": "hi"}]})
+        self.assertNotIn("reasoning_effort", mw_no_key["request"])
+
+        # When reasoning_effort is already in request, middleware shapes effort
+        mw_out = mw_fn(
+            request={
+                "model": "openai/gpt-6-astra-pro",
+                "reasoning_effort": "high",
+                "messages": [{"role": "user", "content": "hi"}],
+            }
+        )
         self.assertEqual(mw_out["request"]["reasoning_effort"], "low")
         self.assertEqual(mw_out["source"], "claim-market-router")
 
@@ -191,20 +212,38 @@ class TestHermesHackathonPlugins(unittest.TestCase):
             set(ctx.tools.keys()),
             {"hunk_propose", "hunk_review_status", "hunk_apply_approved", "hunk_rollback_receipt"},
         )
-        self.assertEqual(set(ctx.hooks.keys()), {"post_tool_call"})
+        self.assertEqual(set(ctx.hooks.keys()), {"pre_tool_call", "post_tool_call"})
         self.assertEqual(set(ctx.middleware.keys()), {"tool_execution"})
         for t in ctx.tools.values():
             self._assert_handler_contract(t["handler"])
+
+        # Verify pre_tool_call escalates hunk_apply_approved to Hermes human approval prompt
+        pre_hook = ctx.hooks["pre_tool_call"][0]
+        gate = pre_hook(tool_name="hunk_apply_approved", args={"proposal_id": 1})
+        self.assertEqual(gate["action"], "approve")
+
+        propose_fn = ctx.tools["hunk_propose"]["handler"]
+        review_fn = ctx.tools["hunk_review_status"]["handler"]
+        apply_fn = ctx.tools["hunk_apply_approved"]["handler"]
+        rollback_fn = ctx.tools["hunk_rollback_receipt"]["handler"]
+        slash_fn = ctx.commands["hunk-desk"]["handler"]
+
+        # 0. Protected file (.env) must be refused before reading or storing
+        blocked_prop = json.loads(
+            propose_fn(
+                {
+                    "target_path": str(self.temp_dir / ".env"),
+                    "proposed_text": "SECRET=1\n",
+                }
+            )
+        )
+        self.assertFalse(blocked_prop["ok"])
 
         target = self.temp_dir / "welcome.md"
         original_content = "Line 1: Hello\nLine 2: Keep me\nLine 3: Keep me too\nLine 4: Goodbye\n"
         target.write_text(original_content, encoding="utf-8")
 
         proposed_content = "Line 1: Hello World!\nLine 2: Keep me\nLine 3: Keep me too\nLine 4: Farewell!\n"
-        propose_fn = ctx.tools["hunk_propose"]["handler"]
-        review_fn = ctx.tools["hunk_review_status"]["handler"]
-        apply_fn = ctx.tools["hunk_apply_approved"]["handler"]
-        rollback_fn = ctx.tools["hunk_rollback_receipt"]["handler"]
 
         # 1. Stage 2-hunk proposal
         prop = json.loads(
@@ -218,10 +257,14 @@ class TestHermesHackathonPlugins(unittest.TestCase):
         )
         self.assertTrue(prop["ok"])
         self.assertEqual(prop["hunk_count"], 2)
+        self.assertEqual(prop["approved_hunks"], [])
         pid = prop["proposal_id"]
 
-        # 2. Approve only hunk 1 and apply -> Line 1 changes, Line 4 stays original!
-        rev = json.loads(review_fn({"proposal_id": pid, "approve_hunks": [1]}))
+        # 2. Model-facing hunk_review_status cannot approve hunks; user slash command approves hunk 1
+        model_attempt = json.loads(review_fn({"proposal_id": pid, "approve_hunks": [1]}))
+        self.assertEqual(model_attempt["approved_hunks"], [])
+
+        rev = json.loads(slash_fn(f"approve {pid} 1"))
         self.assertTrue(rev["ok"])
         self.assertEqual(rev["approved_hunks"], [1])
 
@@ -231,24 +274,26 @@ class TestHermesHackathonPlugins(unittest.TestCase):
             target.read_text(encoding="utf-8"),
             "Line 1: Hello World!\nLine 2: Keep me\nLine 3: Keep me too\nLine 4: Goodbye\n",
         )
+        self.assertGreaterEqual(len(ctx.dispatched_tools), 1)
+        self.assertEqual(ctx.dispatched_tools[-1][0], "write_file")
         receipt_id = applied["receipt_id"]
 
-        # 3. Roll back using receipt -> restores exact original text
+        # 3. Roll back using receipt -> restores exact original text via write_file dispatch
         rb = json.loads(rollback_fn({"receipt_id": receipt_id}))
         self.assertTrue(rb["ok"])
         self.assertEqual(target.read_text(encoding="utf-8"), original_content)
 
-        # 4. Stage another proposal, approve all, then modify file out-of-band -> drift revokes approvals!
+        # 4. Stage another proposal, user approves hunks 1,2, then modify file out-of-band -> drift revokes approvals!
         prop2 = json.loads(
             propose_fn(
                 {
                     "target_path": str(target),
                     "proposed_text": proposed_content,
-                    "auto_approve_all": True,
                 }
             )
         )
         pid2 = prop2["proposal_id"]
+        slash_fn(f"approve {pid2} 1,2")
         target.write_text(original_content + "Out-of-band human edit\n", encoding="utf-8")
 
         drift_apply = json.loads(apply_fn({"proposal_id": pid2}))

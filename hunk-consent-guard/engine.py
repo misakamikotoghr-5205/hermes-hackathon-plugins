@@ -16,9 +16,154 @@ from typing import Any, Sequence
 
 from .storage import get_db
 
+_ACTIVE_CTX: Any = None
+_IN_INTERNAL_WRITE: bool = False
+
+_FALLBACK_BLOCKED_NAMES = frozenset(
+    {
+        ".env",
+        "credentials.json",
+        "id_rsa",
+        "id_ed25519",
+        "authorized_keys",
+        ".netrc",
+        ".npmrc",
+        ".pypirc",
+    }
+)
+
+
+def bind_plugin_context(ctx: Any) -> None:
+    """Bind the active Hermes PluginContext so file writes dispatch through write_file."""
+    global _ACTIVE_CTX
+    _ACTIVE_CTX = ctx
+
+
+def is_in_internal_write() -> bool:
+    """Return True while hunk-consent-guard is dispatching an internal write_file call."""
+    return _IN_INTERNAL_WRITE
+
 
 def sha256_text(text: str) -> str:
     return hashlib.sha256(text.encode("utf-8")).hexdigest()
+
+
+def resolve_workspace_path(raw_path: str, task_id: str = "default") -> Path:
+    """Resolve relative paths against the terminal cwd, matching Hermes write_file semantics."""
+    try:
+        from tools.file_tools_paths import _resolve_path_for_task  # type: ignore
+
+        return Path(str(_resolve_path_for_task(raw_path, task_id)))
+    except Exception:
+        pass
+
+    expanded = Path(raw_path).expanduser()
+    if not expanded.is_absolute():
+        base_cwd: Path | None = None
+        try:
+            from agent.runtime_cwd import resolve_agent_cwd  # type: ignore
+
+            base_cwd = Path(resolve_agent_cwd())
+        except Exception:
+            base_cwd = Path.cwd()
+        expanded = base_cwd / expanded
+    return expanded.resolve()
+
+
+def _fallback_safety_error(candidate: str, *, check_read: bool, check_write: bool) -> str | None:
+    """Fallback denylist check used only when running outside the Hermes runtime."""
+    raw = str(candidate or "").strip()
+    if raw.startswith("\\\\?\\") or raw.startswith("\\??\\"):
+        return f"Blocked NT namespace path: {raw}"
+    try:
+        p = Path(raw)
+        name = p.name.lower()
+        parts_lower = {part.lower() for part in p.parts}
+    except Exception:
+        return f"Invalid file path: {raw}"
+
+    if name in _FALLBACK_BLOCKED_NAMES or (name.startswith(".env.") and name != ".env.example"):
+        action = "Read/write" if (check_read and check_write) else ("Read" if check_read else "Write")
+        return f"{action} denied by safety policy for protected file: {p.name}"
+    if ".ssh" in parts_lower or ".aws" in parts_lower or ".gnupg" in parts_lower:
+        return f"Access denied for protected credential directory in path: {raw}"
+    return None
+
+
+def check_file_safety(
+    raw_path: str,
+    resolved_path: Path | str | None = None,
+    *,
+    check_read: bool = True,
+    check_write: bool = True,
+) -> str | None:
+    """Check Hermes core read-blocklist and write-denylist on both raw and resolved paths."""
+    candidates: list[str] = [str(raw_path)]
+    if resolved_path is not None and str(resolved_path) not in candidates:
+        candidates.append(str(resolved_path))
+
+    try:
+        from agent.file_safety import get_read_block_error, get_write_denied_error  # type: ignore
+
+        for cand in candidates:
+            if check_read:
+                read_err = get_read_block_error(cand)
+                if read_err:
+                    return str(read_err)
+            if check_write:
+                write_err = get_write_denied_error(cand)
+                if write_err:
+                    return str(write_err)
+        return None
+    except ImportError:
+        for cand in candidates:
+            err = _fallback_safety_error(cand, check_read=check_read, check_write=check_write)
+            if err:
+                return err
+        return None
+
+
+def _write_file_via_ctx(
+    target_path: Path,
+    content: str,
+    *,
+    ctx: Any = None,
+) -> str | None:
+    """Write file contents exclusively through ctx.dispatch_tool('write_file', ...)."""
+    global _IN_INTERNAL_WRITE
+
+    safety_err = check_file_safety(str(target_path), target_path, check_read=False, check_write=True)
+    if safety_err:
+        return safety_err
+
+    active_ctx = ctx or _ACTIVE_CTX
+    if active_ctx is None or not hasattr(active_ctx, "dispatch_tool"):
+        return "Write refused: no active Hermes PluginContext.dispatch_tool available."
+
+    _IN_INTERNAL_WRITE = True
+    try:
+        raw_res = active_ctx.dispatch_tool(
+            "write_file",
+            {"path": str(target_path), "content": content},
+        )
+    except Exception as exc:
+        return f"write_file dispatch failed: {exc}"
+    finally:
+        _IN_INTERNAL_WRITE = False
+
+    if isinstance(raw_res, dict):
+        if raw_res.get("error"):
+            return str(raw_res["error"])
+        return None
+
+    if isinstance(raw_res, str) and raw_res.strip():
+        try:
+            parsed = json.loads(raw_res)
+            if isinstance(parsed, dict) and parsed.get("error"):
+                return str(parsed["error"])
+        except Exception:
+            pass
+    return None
 
 
 def compute_hunks(old_text: str, new_text: str, target_path: str = "file") -> list[dict[str, Any]]:
@@ -88,9 +233,17 @@ def create_proposal(
     target_path: str,
     proposed_text: str,
     summary: str = "",
-    auto_approve_all: bool = False,
+    task_id: str = "default",
 ) -> dict[str, Any]:
-    path_obj = Path(target_path).expanduser().resolve()
+    raw_err = check_file_safety(target_path, None, check_read=True, check_write=True)
+    if raw_err:
+        return {"ok": False, "error": raw_err}
+
+    path_obj = resolve_workspace_path(target_path, task_id=task_id)
+    safety_err = check_file_safety(target_path, path_obj, check_read=True, check_write=True)
+    if safety_err:
+        return {"ok": False, "error": safety_err}
+
     if not path_obj.exists():
         baseline_text = ""
     else:
@@ -104,7 +257,7 @@ def create_proposal(
             "error": "Proposed text is identical to current file baseline; no hunks generated.",
         }
 
-    approved_ids = [h["hunk_id"] for h in hunks] if auto_approve_all else []
+    approved_ids: list[int] = []
     conn = get_db()
     try:
         with conn:
@@ -123,7 +276,7 @@ def create_proposal(
                     baseline_text,
                     json.dumps(hunks, ensure_ascii=False),
                     json.dumps(approved_ids),
-                    "approved" if approved_ids else "pending",
+                    "pending",
                 ),
             )
             proposal_id = int(cur.lastrowid or 0)
@@ -137,7 +290,7 @@ def create_proposal(
         "baseline_sha256": baseline_hash,
         "hunk_count": len(hunks),
         "approved_hunks": approved_ids,
-        "status": "approved" if approved_ids else "pending",
+        "status": "pending",
         "hunks": [
             {
                 "hunk_id": h["hunk_id"],
@@ -156,7 +309,7 @@ def check_and_update_Approvals(
     approve_hunks: Sequence[int] | None = None,
     revoke_all: bool = False,
 ) -> dict[str, Any]:
-    """Inspect a proposal, verify its baseline has not drifted on disk, and optionally update approved hunks."""
+    """Inspect a proposal, verify its baseline has not drifted on disk, and (when called by user CLI/slash commands) update approved hunks."""
     conn = get_db()
     try:
         row = conn.execute("SELECT * FROM hunk_proposals WHERE id = ?", (int(proposal_id),)).fetchone()
@@ -164,6 +317,10 @@ def check_and_update_Approvals(
             return {"ok": False, "error": f"Proposal #{proposal_id} not found."}
 
         target_path = Path(row["target_path"])
+        safety_err = check_file_safety(str(target_path), target_path, check_read=True, check_write=True)
+        if safety_err:
+            return {"ok": False, "error": safety_err}
+
         current_text = target_path.read_text(encoding="utf-8") if target_path.exists() else ""
         current_hash = sha256_text(current_text)
         baseline_hash = str(row["baseline_sha256"])
@@ -244,9 +401,17 @@ def check_and_update_Approvals(
         conn.close()
 
 
-def apply_approved_proposal(proposal_id: int, max_snapshot_kb: int = 256) -> dict[str, Any]:
+check_and_update_approvals = check_and_update_Approvals
+
+
+def apply_approved_proposal(
+    proposal_id: int,
+    max_snapshot_kb: int = 256,
+    *,
+    ctx: Any = None,
+) -> dict[str, Any]:
     """Apply the approved hunks of a proposal if and only if the baseline SHA-256 is unchanged,
-    and persist an atomic rollback receipt.
+    dispatching the write through Hermes write_file and persisting an atomic rollback receipt.
     """
     status_check = check_and_update_Approvals(proposal_id=proposal_id)
     if not status_check.get("ok"):
@@ -266,7 +431,7 @@ def apply_approved_proposal(proposal_id: int, max_snapshot_kb: int = 256) -> dic
                 "ok": False,
                 "error": (
                     f"Proposal #{proposal_id} has no approved hunks. "
-                    f"Approve hunks first via hunk_review_status or `/hunk-desk approve {proposal_id} 1`."
+                    f"User approval is required via `/hunk-desk approve {proposal_id} 1` or `hermes hunk-desk approve {proposal_id} 1`."
                 ),
             }
 
@@ -276,8 +441,9 @@ def apply_approved_proposal(proposal_id: int, max_snapshot_kb: int = 256) -> dic
         after_hash = sha256_text(new_text)
 
         target_path = Path(row["target_path"])
-        target_path.parent.mkdir(parents=True, exist_ok=True)
-        target_path.write_text(new_text, encoding="utf-8")
+        write_err = _write_file_via_ctx(target_path, new_text, ctx=ctx)
+        if write_err:
+            return {"ok": False, "error": write_err}
 
         diff_str = "".join(
             difflib.unified_diff(
@@ -338,14 +504,18 @@ def record_direct_write_receipt(
     before_text: str,
     after_text: str,
     max_snapshot_kb: int = 256,
+    task_id: str = "default",
 ) -> int | None:
-    """Record a rollback receipt from tool_execution middleware when a file changes."""
+    """Record a rollback receipt from tool_execution middleware when an allowed file changes."""
     before_hash = sha256_text(before_text)
     after_hash = sha256_text(after_text)
     if before_hash == after_hash:
         return None
 
-    path_obj = Path(target_path).expanduser().resolve()
+    path_obj = resolve_workspace_path(target_path, task_id=task_id)
+    if check_file_safety(target_path, path_obj, check_read=True, check_write=True):
+        return None
+
     diff_str = "".join(
         difflib.unified_diff(
             before_text.splitlines(keepends=True),
@@ -384,7 +554,7 @@ def record_direct_write_receipt(
         conn.close()
 
 
-def rollback_from_receipt(receipt_id: int) -> dict[str, Any]:
+def rollback_from_receipt(receipt_id: int, *, ctx: Any = None) -> dict[str, Any]:
     """Restore a file using a persisted receipt if and only if current file hash matches after_sha256."""
     conn = get_db()
     try:
@@ -400,6 +570,10 @@ def rollback_from_receipt(receipt_id: int) -> dict[str, Any]:
             }
 
         target_path = Path(row["target_path"])
+        safety_err = check_file_safety(str(target_path), target_path, check_read=True, check_write=True)
+        if safety_err:
+            return {"ok": False, "error": safety_err}
+
         current_text = target_path.read_text(encoding="utf-8") if target_path.exists() else ""
         current_hash = sha256_text(current_text)
         expected_after_hash = str(row["after_sha256"])
@@ -418,7 +592,10 @@ def rollback_from_receipt(receipt_id: int) -> dict[str, Any]:
             }
 
         before_text = str(row["before_text"])
-        target_path.write_text(before_text, encoding="utf-8")
+        write_err = _write_file_via_ctx(target_path, before_text, ctx=ctx)
+        if write_err:
+            return {"ok": False, "error": write_err}
+
         with conn:
             conn.execute("UPDATE rollback_receipts SET rolled_back = 1 WHERE id = ?", (int(receipt_id),))
 

@@ -22,7 +22,6 @@ provides_tools:
 provides_hooks:
   - post_llm_call
   - post_api_request
-  - on_delegation
 provides_middleware:
   - llm_request
 config_schema:

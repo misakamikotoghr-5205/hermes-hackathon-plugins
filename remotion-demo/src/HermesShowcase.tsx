@@ -401,7 +401,7 @@ const SCENES: SceneSpec[] = [
     secondaryAccent: '#a855f7',
     terminalTitle: 'Install & Run in Hermes Agent Today',
     formulaBanner:
-      'CATALOG PR: github.com/NousResearch/hermes-agent/pull/149353  •  PINNED SHA: 55834024dc0a8f0019b8062847ba95c87b113237',
+      'CATALOG PR: github.com/NousResearch/hermes-agent/pull/149353  •  PINNED SHA: 00701f42a5e5dc5dc6141827dca0776874c7fa17',
     voiceover:
       'All three plugins run on pure Python standard library and profile-scoped SQLite storage. Check out Pull Request 149353 on NousResearch/hermes-agent!',
     lines: [

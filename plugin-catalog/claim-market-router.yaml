@@ -1,7 +1,7 @@
 name: claim-market-router
 title: Claim Market Router
 repo: https://github.com/misakamikotoghr-5205/hermes-hackathon-plugins
-sha: "55834024dc0a8f0019b8062847ba95c87b113237"
+sha: "00701f42a5e5dc5dc6141827dca0776874c7fa17"
 subdir: claim-market-router
 version: "1.0.0"
 description: >-
@@ -27,7 +27,6 @@ capabilities:
   provides_hooks:
     - post_llm_call
     - post_api_request
-    - on_delegation
   provides_middleware:
     - llm_request
   requires_env: []

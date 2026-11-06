@@ -45,11 +45,6 @@ def _on_post_llm_call(**kwargs: Any) -> None:
         logger.debug("claim-market-router post_llm_call error: %s", exc)
 
 
-def _on_delegation(**kwargs: Any) -> None:
-    """Observer hook (`on_delegation`): record subagent delegation token usage if reported."""
-    _on_post_llm_call(**kwargs)
-
-
 def _make_llm_request_middleware(ctx: Any):
     """Build the llm_request middleware closure bound to this plugin's config."""
 
@@ -79,8 +74,13 @@ def _make_llm_request_middleware(ctx: Any):
         messages = updated.get("messages") or []
         turn_count = len(messages) if isinstance(messages, list) else 0
 
-        # When shadow price is high (>0.20) on early exploratory turns, conserve quota with 'low' effort
-        if shadow >= 0.20 and turn_count <= 4 and updated.get("reasoning_effort") in (None, "high", "medium"):
+        # Only rewrite reasoning_effort when the key is already present in the request
+        if (
+            "reasoning_effort" in updated
+            and shadow >= 0.20
+            and turn_count <= 4
+            and updated.get("reasoning_effort") in ("high", "medium")
+        ):
             updated["reasoning_effort"] = "low"
             return {
                 "request": updated,
@@ -149,7 +149,6 @@ def register(ctx: Any) -> None:
     )
     ctx.register_hook("post_llm_call", _on_post_llm_call)
     ctx.register_hook("post_api_request", _on_post_llm_call)
-    ctx.register_hook("on_delegation", _on_delegation)
     ctx.register_middleware("llm_request", _make_llm_request_middleware(ctx))
 
     if hasattr(ctx, "register_delegation_provider"):

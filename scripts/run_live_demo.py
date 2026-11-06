@@ -92,7 +92,11 @@ def main() -> int:
             usage={"prompt_tokens": 60000, "completion_tokens": 35000, "total_tokens": 95000},
         )
         mw_res = cm_ctx.middleware["llm_request"][0](
-            request={"model": "openai/gpt-6-astra-pro", "messages": [{"role": "user", "content": "list files"}]}
+            request={
+                "model": "openai/gpt-6-astra-pro",
+                "reasoning_effort": "high",
+                "messages": [{"role": "user", "content": "list files"}],
+            }
         )
         print(
             f"[1d] llm_request Middleware after 95k/100k tokens -> "
@@ -137,11 +141,11 @@ def main() -> int:
             f"hunk_count={prop['hunk_count']}, baseline_sha256={prop['baseline_sha256'][:12]}..."
         )
 
-        hc_ctx.tools["hunk_review_status"]["handler"]({"proposal_id": pid, "approve_hunks": [1]})
+        hc_ctx.commands["hunk-desk"]["handler"](f"approve {pid} 1")
         applied = json.loads(hc_ctx.tools["hunk_apply_approved"]["handler"]({"proposal_id": pid}))
         after_lines = [line.strip() for line in demo_file.read_text(encoding="utf-8").splitlines()]
         print(
-            f"[2b] Approved ONLY Hunk #1 (rejected Hunk #2 DEBUG_MODE=True) -> "
+            f"[2b] User approved ONLY Hunk #1 via `/hunk-desk approve {pid} 1` (rejected Hunk #2 DEBUG_MODE=True) -> "
             f"applied_hunks={applied['applied_hunks']}, receipt_id=#{applied['receipt_id']}"
         )
         print(f"     Resulting lines: {after_lines}")
@@ -159,10 +163,10 @@ def main() -> int:
                 {
                     "target_path": str(demo_file),
                     "proposed_text": proposed_code,
-                    "auto_approve_all": True,
                 }
             )
         )
+        hc_ctx.commands["hunk-desk"]["handler"](f"approve {prop2['proposal_id']} 1,2")
         demo_file.write_text(original_code + "# Concurrent human edit\n", encoding="utf-8")
         drift = json.loads(
             hc_ctx.tools["hunk_apply_approved"]["handler"]({"proposal_id": prop2["proposal_id"]})
