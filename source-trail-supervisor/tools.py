@@ -8,6 +8,23 @@ from typing import Any
 from .supervisor import get_supervisor_overview, record_decision_node
 from .trail import validate_and_ingest_packet, verify_selection_and_contradiction_gate
 
+_ACTIVE_CTX: Any = None
+
+
+def bind_plugin_context(ctx: Any) -> None:
+    """Bind the active Hermes PluginContext so tools read declared plugin settings."""
+    global _ACTIVE_CTX
+    _ACTIVE_CTX = ctx
+
+
+def _strict_quote_match_setting() -> bool:
+    if _ACTIVE_CTX is not None and hasattr(_ACTIVE_CTX, "get_config"):
+        try:
+            return bool(_ACTIVE_CTX.get_config("strict_quote_match", default=True))
+        except Exception:
+            return True
+    return True
+
 
 def source_trail_ingest(args: dict[str, Any], **kwargs: Any) -> str:
     try:
@@ -18,7 +35,7 @@ def source_trail_ingest(args: dict[str, Any], **kwargs: Any) -> str:
             packet_id=packet_id,
             sources=sources,
             anchors=anchors,
-            strict_quote_match=True,
+            strict_quote_match=_strict_quote_match_setting(),
         )
         return json.dumps(res, ensure_ascii=False)
     except Exception as exc:

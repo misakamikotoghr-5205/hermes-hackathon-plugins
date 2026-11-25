@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 from typing import Any
 
-from .market import DEFAULT_CANDIDATES, compute_shadow_price, run_claim_auction
+from .market import DEFAULT_CANDIDATES, EXAMPLE_CANDIDATES, compute_shadow_price, run_claim_auction
 from .storage import clear_ledger, get_window_usage, list_recent_auctions
 
 
@@ -20,15 +20,29 @@ def claim_market_auction(args: dict[str, Any], **kwargs: Any) -> str:
         complexity = int(args.get("complexity") or 3)
         max_cost_raw = args.get("max_cost_units")
         max_cost_units = float(max_cost_raw) if max_cost_raw is not None else None
+        raw_candidates = args.get("candidates")
+        if isinstance(raw_candidates, list) and raw_candidates:
+            candidate_pool = raw_candidates
+            using_examples = False
+        elif DEFAULT_CANDIDATES:
+            candidate_pool = DEFAULT_CANDIDATES
+            using_examples = False
+        else:
+            candidate_pool = EXAMPLE_CANDIDATES
+            using_examples = True
 
         result = run_claim_auction(
             goal=goal,
             role_needed=role_needed,
             complexity=complexity,
             max_cost_units=max_cost_units,
+            candidates=candidate_pool,
             record_receipt=True,
         )
-        return json.dumps({"ok": True, **result}, ensure_ascii=False)
+        return json.dumps(
+            {"ok": True, "using_example_candidates": using_examples, **result},
+            ensure_ascii=False,
+        )
     except Exception as exc:
         return json.dumps({"ok": False, "error": f"claim_market_auction failed: {exc}"})
 
@@ -50,7 +64,7 @@ def claim_market_ledger(args: dict[str, Any], **kwargs: Any) -> str:
         usage = get_window_usage()
         by_model = usage.get("by_model", {})
         route_health = []
-        for c in DEFAULT_CANDIDATES:
+        for c in (DEFAULT_CANDIDATES or EXAMPLE_CANDIDATES):
             key = f"{c['provider']}/{c['model']}".strip("/")
             used = int((by_model.get(key) or {}).get("total_tokens", 0))
             quota = int(c.get("window_quota_tokens", 300000))

@@ -9,9 +9,11 @@ import os
 import shutil
 import sys
 import tempfile
+import types
 import unittest
 from pathlib import Path
 from typing import Any
+from unittest import mock
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 
@@ -129,6 +131,17 @@ class TestHermesHackathonPlugins(unittest.TestCase):
         for t in ctx.tools.values():
             self._assert_handler_contract(t["handler"])
 
+        # 0. DEFAULT_CANDIDATES is empty (inherit parent) and EXAMPLE_CANDIDATES are Hermes-valid
+        self.assertEqual(pkg.market.DEFAULT_CANDIDATES, [])
+        for cand in pkg.market.EXAMPLE_CANDIDATES:
+            if cand.get("provider") == "openrouter":
+                self.assertNotIn(cand.get("service_tier"), ("fast", "ultrafast"))
+            self.assertTrue(cand.get("fallback_providers"))
+            for fb in cand["fallback_providers"]:
+                self.assertIsInstance(fb, dict)
+                self.assertTrue(fb.get("provider"))
+                self.assertTrue(fb.get("model"))
+
         # 1. Explorer task -> should select cheap fast route (google/gemini-3.8-flash)
         auction_fn = ctx.tools["claim_market_auction"]["handler"]
         res_explore = json.loads(
@@ -136,9 +149,12 @@ class TestHermesHackathonPlugins(unittest.TestCase):
         )
         self.assertTrue(res_explore["ok"])
         self.assertTrue(res_explore["feasible"])
+        self.assertTrue(res_explore["using_example_candidates"])
         self.assertEqual(res_explore["winner"]["name"], "scout-fast")
         self.assertEqual(res_explore["winner"]["model"], "google/gemini-3.8-flash")
-        self.assertEqual(res_explore["winner"]["service_tier"], "fast")
+        self.assertEqual(res_explore["winner"]["service_tier"], "")
+        self.assertIsInstance(res_explore["winner"]["fallback_providers"][0], dict)
+        self.assertEqual(res_explore["winner"]["fallback_providers"][0]["provider"], "openrouter")
         self.assertNotEqual(res_explore["recommended_verifier"], "scout-fast")
 
         # 2. Finalizer high-complexity task -> should select frontier route (openai/gpt-6-astra-pro)
@@ -148,6 +164,8 @@ class TestHermesHackathonPlugins(unittest.TestCase):
         self.assertTrue(res_final["ok"])
         self.assertEqual(res_final["winner"]["name"], "arbiter-frontier")
         self.assertEqual(res_final["winner"]["model"], "openai/gpt-6-astra-pro")
+        self.assertEqual(res_final["winner"]["service_tier"], "")
+        self.assertIsInstance(res_final["winner"]["fallback_providers"][0], dict)
 
         # 3. Infeasible cost ceiling -> should return explainable sensitivity report
         res_infeasible = json.loads(
@@ -164,17 +182,33 @@ class TestHermesHackathonPlugins(unittest.TestCase):
         self.assertFalse(res_infeasible["feasible"])
         self.assertIn("Sensitivity:", res_infeasible["infeasibility_report"])
 
-        # 4. DelegationProvider route_task contract (including service_tier & fallback_providers) & llm_request middleware
+        # 4. DelegationProvider route_task contract:
+        #    (a) empty default config inherits parent route (never routes to unconfigured providers)
         provider = ctx.delegation_providers[0]
         self.assertEqual(provider.name, "claim_market")
-        route = provider.route_task(
+        default_route = provider.route_task(
             {"goal": "Implement parser module", "role_needed": "implementer", "complexity": 3},
             {},
         )
-        self.assertIn("model", route)
-        self.assertIn("service_tier", route)
-        self.assertIn("fallback_providers", route)
-        self.assertIn("label", route)
+        self.assertNotIn("model", default_route)
+        self.assertNotIn("provider", default_route)
+        self.assertNotIn("service_tier", default_route)
+        self.assertNotIn("fallback_providers", default_route)
+        self.assertIn("label", default_route)
+
+        #    (b) configured EXAMPLE_CANDIDATES routes all 4 roles cleanly with dict fallback_providers
+        configured_cfg = {"backends": {"claim_market": {"candidates": pkg.market.EXAMPLE_CANDIDATES}}}
+        for role, comp in (("explorer", 1), ("implementer", 3), ("verifier", 4), ("finalizer", 5)):
+            route = provider.route_task(
+                {"goal": f"Run {role} task", "role_needed": role, "complexity": comp},
+                configured_cfg,
+            )
+            self.assertIn("model", route)
+            self.assertEqual(route["provider"], "openrouter")
+            self.assertNotIn("service_tier", route)
+            self.assertIn("fallback_providers", route)
+            self.assertTrue(all(isinstance(fb, dict) and fb.get("provider") and fb.get("model") for fb in route["fallback_providers"]))
+            self.assertIn("label", route)
 
         # Record high token usage via post_api_request hook and verify llm_request middleware shapes effort
         hook_fn = ctx.hooks["post_api_request"][0]
@@ -199,6 +233,74 @@ class TestHermesHackathonPlugins(unittest.TestCase):
         )
         self.assertEqual(mw_out["request"]["reasoning_effort"], "low")
         self.assertEqual(mw_out["source"], "claim-market-router")
+
+    def test_claim_market_defaults_through_resolve_task_routes(self) -> None:
+        """Run default (empty) and EXAMPLE_CANDIDATES configs through Hermes's resolve_task_routes."""
+        try:
+            from agent import delegation_registry
+            from hermes_cli.fallback_config import get_fallback_chain
+            from tools.delegate_tool_routes import resolve_task_routes
+        except ImportError:
+            self.skipTest("Hermes core modules (tools.delegate_tool_routes) not available in standalone test env")
+
+        pkg = load_plugin_package("claim-market-router")
+        provider = pkg.provider.ClaimMarketDelegationProvider()
+        prev = delegation_registry.snapshot_registration(provider.name)
+        delegation_registry.register_provider(provider)
+        try:
+            parent_agent = types.SimpleNamespace(
+                model="anthropic/claude-sonnet-5.5",
+                provider="openrouter",
+                base_url="https://openrouter.ai/api/v1",
+                api_key="sk-or-test",
+                request_overrides={},
+                _fallback_chain=[],
+            )
+            tasks = [
+                {"goal": "Explore codebase", "role_needed": "explorer", "complexity": 1},
+                {"goal": "Implement module", "role_needed": "implementer", "complexity": 3},
+                {"goal": "Verify invariants", "role_needed": "verifier", "complexity": 4},
+                {"goal": "Finalize release", "role_needed": "finalizer", "complexity": 5},
+            ]
+
+            # 1. Default config (empty DEFAULT_CANDIDATES) inherits parent cleanly for every role
+            default_routes, default_err = resolve_task_routes(
+                tasks,
+                {"backend": "claim_market"},
+                parent_agent,
+            )
+            self.assertIsNone(default_err)
+            self.assertEqual(len(default_routes), len(tasks))
+            for task_route in default_routes:
+                self.assertIsNone(task_route.error)
+                self.assertIsNone(task_route.creds.get("provider"))
+                self.assertIsNone(task_route.creds.get("model"))
+
+            # 2. README / EXAMPLE_CANDIDATES config resolves all 4 roles without fast-tier errors
+            #    and preserves dict fallback_providers through Hermes's fallback normalizer
+            cfg_with_examples = {
+                "backend": "claim_market",
+                "backends": {"claim_market": {"candidates": pkg.market.EXAMPLE_CANDIDATES}},
+            }
+            with mock.patch.dict(os.environ, {"OPENROUTER_API_KEY": "sk-or-test"}):
+                example_routes, example_err = resolve_task_routes(
+                    tasks,
+                    cfg_with_examples,
+                    parent_agent,
+                )
+            self.assertIsNone(example_err)
+            self.assertEqual(len(example_routes), len(tasks))
+            for task_route in example_routes:
+                self.assertIsNone(task_route.error, f"Route failed unexpectedly: {task_route.error}")
+                self.assertEqual(task_route.creds.get("provider"), "openrouter")
+                self.assertIsNone(task_route.creds.get("service_tier"))
+                chain = get_fallback_chain(task_route.routing_cfg)
+                self.assertGreaterEqual(len(chain), 2)
+                for entry in chain:
+                    self.assertEqual(entry["provider"], "openrouter")
+                    self.assertTrue(entry["model"])
+        finally:
+            delegation_registry.restore_registration(provider.name, provider, prev)
 
     # ------------------------------------------------------------------
     # Plugin 2: hunk-consent-guard
@@ -401,6 +503,34 @@ class TestHermesHackathonPlugins(unittest.TestCase):
         self.assertTrue(ov["ok"])
         self.assertTrue(ov["is_stuck"])
         self.assertIn("STUCK DETECTED", ov["remedy"])
+
+        # 4. strict_quote_match setting controls whitespace sensitivity during source_trail_ingest
+        ws_doc = "Refunds  are\ngranted within 14 days."
+        ws_payload = {
+            "packet_id": "pkt-ws",
+            "sources": [{"id": "s1", "title": "WS Doc", "text": ws_doc}],
+            "anchors": [
+                {
+                    "id": "a1",
+                    "source_id": "s1",
+                    "start": 0,
+                    "end": len(ws_doc),
+                    "quote": "Refunds are granted within 14 days.",
+                    "topic": "refund_policy",
+                    "position": "allow_14d",
+                }
+            ],
+        }
+        # Default strict_quote_match=True rejects whitespace mismatch
+        strict_res = json.loads(ingest_fn(ws_payload))
+        self.assertFalse(strict_res["ok"])
+        self.assertEqual(strict_res["status"], "validation_failed")
+
+        # Setting strict_quote_match=False accepts whitespace-normalized quote
+        ctx.set_config("strict_quote_match", False)
+        relaxed_res = json.loads(ingest_fn(ws_payload))
+        self.assertTrue(relaxed_res["ok"])
+        self.assertEqual(relaxed_res["verified_anchor_count"], 1)
 
 
 if __name__ == "__main__":

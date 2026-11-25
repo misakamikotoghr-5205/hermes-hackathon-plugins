@@ -104,6 +104,8 @@ def _run_cli(args: Any) -> int:
 
 def register(ctx: Any) -> None:
     """Register tools, hooks, bundled skill, and commands with Hermes."""
+    tools.bind_plugin_context(ctx)
+
     ctx.register_tool(
         name="source_trail_ingest",
         toolset="source-trail-supervisor",

@@ -53,7 +53,7 @@ def main() -> int:
         )
         print(
             f"[1a] Explorer Task (complexity=1) -> Winner: {r1['winner']['name']} "
-            f"({r1['winner']['model']}, tier={r1['winner']['service_tier']}, cost={r1['winner']['cost_units']}, "
+            f"({r1['winner']['model']}, tier={r1['winner'].get('service_tier') or 'normal'}, cost={r1['winner']['cost_units']}, "
             f"mode={r1['resolution_mode']}, verifier={r1['recommended_verifier']})"
         )
 

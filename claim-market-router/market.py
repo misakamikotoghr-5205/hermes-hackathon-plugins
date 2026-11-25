@@ -14,14 +14,26 @@ from .storage import get_window_usage, record_auction_receipt
 
 VALID_ROLES = ("explorer", "implementer", "verifier", "finalizer")
 
-DEFAULT_CANDIDATES: list[dict[str, Any]] = [
+# Empty by default so enabling `delegation.backend: claim_market` inherits the
+# parent's model/provider until the user explicitly configures candidate routes
+# under `delegation.backends.claim_market.candidates`.
+DEFAULT_CANDIDATES: list[dict[str, Any]] = []
+
+# Reference candidate set used in documentation examples and offline dry-run
+# simulations (`claim_market_auction` tool / `/claim-market auction`).
+# OpenRouter routes omit `service_tier` (Hermes allows `fast` only on first-party
+# Anthropic/OpenAI/xAI endpoints) and write `fallback_providers` as
+# `{provider, model}` dicts matching Hermes's fallback chain contract.
+EXAMPLE_CANDIDATES: list[dict[str, Any]] = [
     {
         "name": "scout-fast",
         "provider": "openrouter",
         "model": "google/gemini-3.8-flash",
         "reasoning_effort": "low",
-        "service_tier": "fast",
-        "fallback_providers": ["deepseek/deepseek-v4.1-flash", "z-ai/glm-5.3-flashx"],
+        "fallback_providers": [
+            {"provider": "openrouter", "model": "deepseek/deepseek-v4.1-flash"},
+            {"provider": "openrouter", "model": "z-ai/glm-5.3-flashx"},
+        ],
         "cost_units": 1.0,
         "quality_tier": 2,
         "preferred_roles": ["explorer", "implementer"],
@@ -33,8 +45,10 @@ DEFAULT_CANDIDATES: list[dict[str, Any]] = [
         "provider": "openrouter",
         "model": "anthropic/claude-sonnet-5.5",
         "reasoning_effort": "medium",
-        "service_tier": "normal",
-        "fallback_providers": ["openai/gpt-6.1-sol", "moonshotai/kimi-k3"],
+        "fallback_providers": [
+            {"provider": "openrouter", "model": "openai/gpt-6.1-sol"},
+            {"provider": "openrouter", "model": "moonshotai/kimi-k3"},
+        ],
         "cost_units": 3.5,
         "quality_tier": 4,
         "preferred_roles": ["implementer", "verifier"],
@@ -46,8 +60,10 @@ DEFAULT_CANDIDATES: list[dict[str, Any]] = [
         "provider": "openrouter",
         "model": "openai/gpt-6-astra-pro",
         "reasoning_effort": "high",
-        "service_tier": "fast",
-        "fallback_providers": ["anthropic/claude-opus-5.5", "google/gemini-4-argon"],
+        "fallback_providers": [
+            {"provider": "openrouter", "model": "anthropic/claude-opus-5.5"},
+            {"provider": "openrouter", "model": "google/gemini-4-argon"},
+        ],
         "cost_units": 8.0,
         "quality_tier": 5,
         "preferred_roles": ["verifier", "finalizer"],
@@ -55,6 +71,32 @@ DEFAULT_CANDIDATES: list[dict[str, Any]] = [
         "window_quota_tokens": 100000,
     },
 ]
+
+
+def normalize_fallback_providers(
+    raw: Any,
+    default_provider: str = "",
+) -> list[dict[str, Any]]:
+    """Normalize fallback_providers into Hermes `{provider, model}` dicts."""
+    if raw is None:
+        return []
+    items = [raw] if isinstance(raw, Mapping) else list(raw) if isinstance(raw, (list, tuple)) else []
+    fallback_provider = str(default_provider or "").strip()
+    normalized: list[dict[str, Any]] = []
+    for item in items:
+        if isinstance(item, Mapping):
+            provider = str(item.get("provider") or fallback_provider).strip()
+            model = str(item.get("model") or "").strip()
+            if provider and model:
+                entry = dict(item)
+                entry["provider"] = provider
+                entry["model"] = model
+                normalized.append(entry)
+        elif isinstance(item, str):
+            model = item.strip()
+            if model and fallback_provider:
+                normalized.append({"provider": fallback_provider, "model": model})
+    return normalized
 
 # Ideal quality tier per (role_needed, complexity)
 _ROLE_MIN_QUALITY = {
@@ -124,7 +166,22 @@ def run_claim_auction(
     """
     role = role_needed if role_needed in VALID_ROLES else "implementer"
     comp = max(1, min(5, int(complexity or 3)))
-    pool = list(candidates) if candidates else list(DEFAULT_CANDIDATES)
+    pool = list(candidates) if candidates is not None else list(DEFAULT_CANDIDATES)
+
+    if not pool:
+        return {
+            "feasible": False,
+            "winner": None,
+            "recommended_verifier": "",
+            "resolution_mode": "infeasible",
+            "confidence": 0.0,
+            "infeasibility_report": (
+                "No candidate routes configured under `delegation.backends.claim_market.candidates` "
+                "(DEFAULT_CANDIDATES is empty so unconfigured tasks inherit the parent route)."
+            ),
+            "rejected_candidates": [],
+            "claims": [],
+        }
 
     usage_snapshot = get_window_usage()
     by_model = usage_snapshot.get("by_model", {})
@@ -219,9 +276,14 @@ def run_claim_auction(
                 "name": name,
                 "provider": c.get("provider", ""),
                 "model": c.get("model", ""),
+                "base_url": c.get("base_url", ""),
+                "api_mode": c.get("api_mode", ""),
                 "reasoning_effort": c.get("reasoning_effort", ""),
                 "service_tier": c.get("service_tier", ""),
-                "fallback_providers": list(c.get("fallback_providers") or []),
+                "fallback_providers": normalize_fallback_providers(
+                    c.get("fallback_providers"),
+                    default_provider=str(c.get("provider") or ""),
+                ),
                 "request_overrides": dict(c.get("request_overrides") or {}),
                 "profile": c.get("profile", ""),
                 "cost_units": cost,

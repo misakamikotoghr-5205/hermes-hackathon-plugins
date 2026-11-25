@@ -18,7 +18,7 @@ except ImportError:
             own = backends.get(self.name) if isinstance(backends, Mapping) else None
             return own if isinstance(own, Mapping) else {}
 
-from .market import VALID_ROLES, run_claim_auction
+from .market import DEFAULT_CANDIDATES, VALID_ROLES, run_claim_auction
 
 
 class ClaimMarketDelegationProvider(DelegationProvider):
@@ -68,7 +68,15 @@ class ClaimMarketDelegationProvider(DelegationProvider):
 
     def route_task(self, task: Mapping[str, Any], config: Mapping[str, Any]) -> dict[str, Any]:
         own_settings = self.settings(config)
-        candidates = own_settings.get("candidates") if isinstance(own_settings, Mapping) else None
+        raw_candidates = own_settings.get("candidates") if isinstance(own_settings, Mapping) else None
+        candidates = list(raw_candidates) if isinstance(raw_candidates, list) else list(DEFAULT_CANDIDATES)
+        if not candidates:
+            # Empty candidate list inherits the parent's model/provider rather than sending
+            # tasks to third-party routes the user has not explicitly configured.
+            return {
+                "label": "claim-market [inherit parent: configure delegation.backends.claim_market.candidates]"
+            }
+
         agreement_margin = float(own_settings.get("agreement_margin", 0.08)) if isinstance(own_settings, Mapping) else 0.08
         window_budget = int(own_settings.get("window_budget_tokens", 500000)) if isinstance(own_settings, Mapping) else 500000
 

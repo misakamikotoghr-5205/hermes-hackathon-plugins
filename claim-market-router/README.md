@@ -23,6 +23,12 @@ hermes plugins enable claim-market-router
 hermes config set delegation.backend claim_market
 ```
 
+By default, `DEFAULT_CANDIDATES` is empty (`[]`): enabling `delegation.backend: claim_market` inherits the parent agent's model and provider until you list `delegation.backends.claim_market.candidates` in `config.yaml`, so the backend never routes tasks to providers or models you did not explicitly configure.
+
+> **Note on `service_tier` and `fallback_providers`:**
+> - Omit `service_tier` on OpenRouter routes (`service_tier: fast` is accepted by Hermes only on first-party Anthropic, OpenAI, or xAI endpoints that offer it).
+> - Write `fallback_providers` entries as `{provider, model}` mappings so Hermes retains the full fallback chain.
+
 Example `config.yaml` setup:
 ```yaml
 delegation:
@@ -36,8 +42,11 @@ delegation:
           provider: openrouter
           model: google/gemini-3.8-flash
           reasoning_effort: low
-          service_tier: fast
-          fallback_providers: [deepseek/deepseek-v4.1-flash, z-ai/glm-5.3-flashx]
+          fallback_providers:
+            - provider: openrouter
+              model: deepseek/deepseek-v4.1-flash
+            - provider: openrouter
+              model: z-ai/glm-5.3-flashx
           cost_units: 1.0
           quality_tier: 2
           preferred_roles: [explorer, implementer]
@@ -47,8 +56,11 @@ delegation:
           provider: openrouter
           model: anthropic/claude-sonnet-5.5
           reasoning_effort: medium
-          service_tier: normal
-          fallback_providers: [openai/gpt-6.1-sol, moonshotai/kimi-k3]
+          fallback_providers:
+            - provider: openrouter
+              model: openai/gpt-6.1-sol
+            - provider: openrouter
+              model: moonshotai/kimi-k3
           cost_units: 3.5
           quality_tier: 4
           preferred_roles: [implementer, verifier]
@@ -58,8 +70,11 @@ delegation:
           provider: openrouter
           model: openai/gpt-6-astra-pro
           reasoning_effort: high
-          service_tier: fast
-          fallback_providers: [anthropic/claude-opus-5.5, google/gemini-4-argon]
+          fallback_providers:
+            - provider: openrouter
+              model: anthropic/claude-opus-5.5
+            - provider: openrouter
+              model: google/gemini-4-argon
           cost_units: 8.0
           quality_tier: 5
           preferred_roles: [verifier, finalizer]
