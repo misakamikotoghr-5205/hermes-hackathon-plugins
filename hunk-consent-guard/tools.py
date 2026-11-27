@@ -57,7 +57,8 @@ def hunk_apply_approved(args: dict[str, Any], **kwargs: Any) -> str:
         proposal_id = args.get("proposal_id")
         if proposal_id is None:
             return json.dumps({"ok": False, "error": "Parameter 'proposal_id' is required."})
-        res = apply_approved_proposal(int(proposal_id))
+        task_id = str(kwargs.get("task_id") or "") or None
+        res = apply_approved_proposal(int(proposal_id), task_id=task_id)
         return json.dumps(res, ensure_ascii=False)
     except Exception as exc:
         return json.dumps({"ok": False, "error": f"hunk_apply_approved failed: {exc}"})
@@ -68,7 +69,8 @@ def hunk_rollback_receipt(args: dict[str, Any], **kwargs: Any) -> str:
         receipt_id = args.get("receipt_id")
         if receipt_id is None:
             return json.dumps({"ok": False, "error": "Parameter 'receipt_id' is required."})
-        res = rollback_from_receipt(int(receipt_id))
+        task_id = str(kwargs.get("task_id") or "") or None
+        res = rollback_from_receipt(int(receipt_id), task_id=task_id)
         return json.dumps(res, ensure_ascii=False)
     except Exception as exc:
         return json.dumps({"ok": False, "error": f"hunk_rollback_receipt failed: {exc}"})

@@ -100,7 +100,7 @@ def _make_tool_execution_middleware(ctx: Any):
 
 
 def _on_pre_tool_call(**kwargs: Any) -> dict[str, Any] | None:
-    """Gate model-initiated hunk_apply_approved calls through Hermes's human approval prompt."""
+    """Gate model-initiated file-mutating hunk tools through Hermes's human approval prompt."""
     tool_name = str(kwargs.get("tool_name") or "")
     args = kwargs.get("args") if isinstance(kwargs.get("args"), dict) else {}
     if tool_name == "hunk_apply_approved":
@@ -108,7 +108,14 @@ def _on_pre_tool_call(**kwargs: Any) -> dict[str, Any] | None:
         return {
             "action": "approve",
             "message": f"Apply approved hunks for staged proposal #{pid}?",
-            "rule_key": "hunk-consent-guard:apply",
+            "rule_key": f"hunk-consent-guard:apply:{pid}",
+        }
+    if tool_name == "hunk_rollback_receipt":
+        rid = args.get("receipt_id")
+        return {
+            "action": "approve",
+            "message": f"Roll back target file to pre-edit snapshot from receipt #{rid}?",
+            "rule_key": f"hunk-consent-guard:rollback:{rid}",
         }
     return None
 

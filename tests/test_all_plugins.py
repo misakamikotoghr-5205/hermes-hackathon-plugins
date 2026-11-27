@@ -319,10 +319,14 @@ class TestHermesHackathonPlugins(unittest.TestCase):
         for t in ctx.tools.values():
             self._assert_handler_contract(t["handler"])
 
-        # Verify pre_tool_call escalates hunk_apply_approved to Hermes human approval prompt
+        # Verify pre_tool_call escalates hunk_apply_approved and hunk_rollback_receipt with per-ID rule keys
         pre_hook = ctx.hooks["pre_tool_call"][0]
         gate = pre_hook(tool_name="hunk_apply_approved", args={"proposal_id": 1})
         self.assertEqual(gate["action"], "approve")
+        self.assertEqual(gate["rule_key"], "hunk-consent-guard:apply:1")
+        rb_gate = pre_hook(tool_name="hunk_rollback_receipt", args={"receipt_id": 7})
+        self.assertEqual(rb_gate["action"], "approve")
+        self.assertEqual(rb_gate["rule_key"], "hunk-consent-guard:rollback:7")
 
         propose_fn = ctx.tools["hunk_propose"]["handler"]
         review_fn = ctx.tools["hunk_review_status"]["handler"]

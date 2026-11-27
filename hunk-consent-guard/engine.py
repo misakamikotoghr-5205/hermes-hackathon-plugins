@@ -123,16 +123,28 @@ def check_file_safety(
         return None
 
 
+def get_max_snapshot_kb(default: int = 256) -> int:
+    """Read max_snapshot_kb from the bound PluginContext config, falling back to default."""
+    if _ACTIVE_CTX is not None and hasattr(_ACTIVE_CTX, "get_config"):
+        try:
+            return max(1, int(_ACTIVE_CTX.get_config("max_snapshot_kb", default=default)))
+        except Exception:
+            return default
+    return default
+
+
 def _write_file_via_ctx(
     target_path: Path,
     content: str,
     *,
     ctx: Any = None,
+    task_id: str | None = None,
 ) -> str | None:
     """Write file contents exclusively through ctx.dispatch_tool('write_file', ...)."""
     global _IN_INTERNAL_WRITE
 
-    safety_err = check_file_safety(str(target_path), target_path, check_read=False, check_write=True)
+    resolved = target_path.resolve()
+    safety_err = check_file_safety(str(target_path), resolved, check_read=False, check_write=True)
     if safety_err:
         return safety_err
 
@@ -140,11 +152,16 @@ def _write_file_via_ctx(
     if active_ctx is None or not hasattr(active_ctx, "dispatch_tool"):
         return "Write refused: no active Hermes PluginContext.dispatch_tool available."
 
+    dispatch_kwargs: dict[str, Any] = {}
+    if task_id:
+        dispatch_kwargs["task_id"] = task_id
+
     _IN_INTERNAL_WRITE = True
     try:
         raw_res = active_ctx.dispatch_tool(
             "write_file",
-            {"path": str(target_path), "content": content},
+            {"path": str(resolved), "content": content},
+            **dispatch_kwargs,
         )
     except Exception as exc:
         return f"write_file dispatch failed: {exc}"
@@ -317,11 +334,12 @@ def check_and_update_Approvals(
             return {"ok": False, "error": f"Proposal #{proposal_id} not found."}
 
         target_path = Path(row["target_path"])
-        safety_err = check_file_safety(str(target_path), target_path, check_read=True, check_write=True)
+        resolved_target = target_path.resolve()
+        safety_err = check_file_safety(str(target_path), resolved_target, check_read=True, check_write=True)
         if safety_err:
             return {"ok": False, "error": safety_err}
 
-        current_text = target_path.read_text(encoding="utf-8") if target_path.exists() else ""
+        current_text = resolved_target.read_text(encoding="utf-8") if resolved_target.exists() else ""
         current_hash = sha256_text(current_text)
         baseline_hash = str(row["baseline_sha256"])
         hunks = json.loads(row["hunks_json"])
@@ -406,13 +424,16 @@ check_and_update_approvals = check_and_update_Approvals
 
 def apply_approved_proposal(
     proposal_id: int,
-    max_snapshot_kb: int = 256,
+    max_snapshot_kb: int | None = None,
     *,
     ctx: Any = None,
+    task_id: str | None = None,
 ) -> dict[str, Any]:
     """Apply the approved hunks of a proposal if and only if the baseline SHA-256 is unchanged,
     dispatching the write through Hermes write_file and persisting an atomic rollback receipt.
     """
+    if max_snapshot_kb is None:
+        max_snapshot_kb = get_max_snapshot_kb()
     status_check = check_and_update_Approvals(proposal_id=proposal_id)
     if not status_check.get("ok"):
         return status_check
@@ -441,7 +462,7 @@ def apply_approved_proposal(
         after_hash = sha256_text(new_text)
 
         target_path = Path(row["target_path"])
-        write_err = _write_file_via_ctx(target_path, new_text, ctx=ctx)
+        write_err = _write_file_via_ctx(target_path, new_text, ctx=ctx, task_id=task_id)
         if write_err:
             return {"ok": False, "error": write_err}
 
@@ -554,7 +575,7 @@ def record_direct_write_receipt(
         conn.close()
 
 
-def rollback_from_receipt(receipt_id: int, *, ctx: Any = None) -> dict[str, Any]:
+def rollback_from_receipt(receipt_id: int, *, ctx: Any = None, task_id: str | None = None) -> dict[str, Any]:
     """Restore a file using a persisted receipt if and only if current file hash matches after_sha256."""
     conn = get_db()
     try:
@@ -570,11 +591,12 @@ def rollback_from_receipt(receipt_id: int, *, ctx: Any = None) -> dict[str, Any]
             }
 
         target_path = Path(row["target_path"])
-        safety_err = check_file_safety(str(target_path), target_path, check_read=True, check_write=True)
+        resolved_target = target_path.resolve()
+        safety_err = check_file_safety(str(target_path), resolved_target, check_read=True, check_write=True)
         if safety_err:
             return {"ok": False, "error": safety_err}
 
-        current_text = target_path.read_text(encoding="utf-8") if target_path.exists() else ""
+        current_text = resolved_target.read_text(encoding="utf-8") if resolved_target.exists() else ""
         current_hash = sha256_text(current_text)
         expected_after_hash = str(row["after_sha256"])
 
@@ -592,7 +614,7 @@ def rollback_from_receipt(receipt_id: int, *, ctx: Any = None) -> dict[str, Any]
             }
 
         before_text = str(row["before_text"])
-        write_err = _write_file_via_ctx(target_path, before_text, ctx=ctx)
+        write_err = _write_file_via_ctx(target_path, before_text, ctx=ctx, task_id=task_id)
         if write_err:
             return {"ok": False, "error": write_err}
 
